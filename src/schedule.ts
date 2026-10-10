@@ -51,6 +51,17 @@ export interface ScheduleCtx {
   services: ServiceCalendar;
   stopIndex: StopIndex;
   routeData: (route: number) => RouteData;
+  stopName: (stop: number) => string;
+}
+
+/** Направление варианта линии: «Начальная → Конечная». */
+export function patternLabel(stopName: (s: number) => string, p: Pattern): string {
+  return `${stopName(p.stops[0])} → ${stopName(p.stops[p.stops.length - 1])}`;
+}
+
+/** Куда едет: название конечной остановки варианта. */
+export function patternDest(stopName: (s: number) => string, p: Pattern): string {
+  return stopName(p.stops[p.stops.length - 1]);
 }
 
 /** Уникальные линии, которые отправляются с остановки. */
@@ -104,21 +115,29 @@ export function patternTimes(cal: ServiceCalendar, pat: Pattern, pos: number, da
 
 export interface DepartureGroup {
   route: number;
+  /** конечная остановка («куда едет») */
   head: string;
+  /** направление целиком: «Мириево 4 → Дорчол» */
+  label: string;
   times: number[];
 }
 
-/** Группировка отправлений по (линия, направление). */
+/** Группировка отправлений по (линия, конечная остановка). */
 export function groupDepartures(ctx: ScheduleCtx, deps: Departure[]): DepartureGroup[] {
-  const map = new Map<string, DepartureGroup>();
+  const map = new Map<string, DepartureGroup & { best: number }>();
   for (const d of deps) {
-    const head = ctx.routeData(d.route).patterns[d.pattern].head;
+    const pat = ctx.routeData(d.route).patterns[d.pattern];
+    const head = patternDest(ctx.stopName, pat);
     const key = `${d.route}|${head}`;
     let g = map.get(key);
-    if (!g) map.set(key, (g = { route: d.route, head, times: [] }));
+    if (!g) map.set(key, (g = { route: d.route, head, label: '', times: [], best: -1 }));
+    if (pat.trips > g.best) {
+      g.best = pat.trips;
+      g.label = patternLabel(ctx.stopName, pat);
+    }
     g.times.push(d.time);
   }
-  return [...map.values()];
+  return [...map.values()].map(({ best: _b, ...g }) => g);
 }
 
 export function fmtTime(sec: number): string {

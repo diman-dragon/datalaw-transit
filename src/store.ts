@@ -67,7 +67,7 @@ export function routeData(r: number): RouteData {
 
 export function ctx(): ScheduleCtx {
   const c = data();
-  return { services: c.services, stopIndex: c.stopIndex, routeData };
+  return { services: c.services, stopIndex: c.stopIndex, routeData, stopName: (s) => c.stops.name[s] };
 }
 
 /** Линии, отправляющиеся с остановки, отсортированные по номеру. */

@@ -28,6 +28,7 @@ interface Stored {
   favRoutes: string[];
   feeds: Pick<FeedCfg, 'key' | 'url' | 'enabled'>[];
   recents: string[];
+  mapTiles: boolean;
 }
 
 const KEY = 'datalaw-transit/prefs/v1';
@@ -39,6 +40,7 @@ function defaults(): Stored {
     favRoutes: [],
     feeds: DEFAULT_FEEDS.map((f) => ({ key: f.key, url: f.url, enabled: f.enabled })),
     recents: [],
+    mapTiles: true,
   };
 }
 
@@ -54,6 +56,7 @@ function load(): Stored {
       if (p.theme === 'amoled' || p.theme === 'sand') d.theme = p.theme;
       if (Array.isArray(p.favStops)) d.favStops = p.favStops.filter((x) => typeof x === 'string');
       if (Array.isArray(p.favRoutes)) d.favRoutes = p.favRoutes.filter((x) => typeof x === 'string');
+      if (typeof p.mapTiles === 'boolean') d.mapTiles = p.mapTiles;
       if (Array.isArray(p.recents)) d.recents = p.recents.filter((x) => typeof x === 'string').slice(0, 12);
       if (Array.isArray(p.feeds)) {
         for (const f of p.feeds) {
@@ -86,6 +89,13 @@ export const prefs = {
   },
   setTheme(t: ThemeName): void {
     load().theme = t;
+    save();
+  },
+  get mapTiles(): boolean {
+    return load().mapTiles;
+  },
+  setMapTiles(v: boolean): void {
+    load().mapTiles = v;
     save();
   },
   feeds(): FeedCfg[] {

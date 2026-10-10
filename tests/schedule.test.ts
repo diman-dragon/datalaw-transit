@@ -15,7 +15,7 @@ import { sampleFeed } from './helpers.ts';
 
 const ds = buildDataset([sampleFeed()]);
 const rdMap = new Map(ds.routeData.map((r) => [r.route, r]));
-const ctx = { services: ds.services, stopIndex: ds.stopIndex, routeData: (r: number) => rdMap.get(r)! };
+const ctx = { services: ds.services, stopIndex: ds.stopIndex, routeData: (r: number) => rdMap.get(r)!, stopName: (s: number) => ds.stops.name[s] };
 const slavija = ds.stops.name.indexOf('Славија');
 const zvezdara = ds.stops.name.indexOf('Звездара');
 const t = (s: number) => fmtTime(s);
@@ -59,7 +59,10 @@ test('фильтр по линии и группировка по направл
   assert.equal(deps[0].time, 10 * 3600);
   const groups = groupDepartures(ctx, departuresAt(ctx, slavija, new Date(2026, 9, 9)));
   assert.equal(groups.length, 2);
-  assert.deepEqual(groups.map((g) => g.head).sort(), ['Калемегдан', 'Звездара'].sort());
+  // направление — по конечной остановке, а не по headsign из GTFS
+  assert.deepEqual(groups.map((g) => g.head).sort(), ['Звездара', 'Звездара']);
+  const g26 = groups.find((g) => g.route === r26)!;
+  assert.equal(g26.label, 'Славија → Звездара');
 });
 
 test('patternTimes и routesAtStop', () => {

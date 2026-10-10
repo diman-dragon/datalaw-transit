@@ -170,7 +170,7 @@ export async function stopView(root: HTMLElement, nav: NavRoute): Promise<() => 
           { class: 'row dep', href: href(['route', r.id]) },
           el('div', { class: 'time' }, fmtTime(a.expected)),
           badge(r, 'lg'),
-          el('div', { class: 'grow' }, el('div', { class: 'title' }, '→ ' + a.head)),
+          el('div', { class: 'grow' }, el('div', { class: 'title' }, '→ ' + a.head), el('div', { class: 'sub' }, a.label)),
           eta !== null ? el('div', { class: 'eta' + (eta < 300 ? ' soon' : '') }, fmtRelative(Math.max(0, eta))) : null,
         ),
       );
@@ -201,7 +201,7 @@ export async function stopView(root: HTMLElement, nav: NavRoute): Promise<() => 
             'a',
             { class: 'card-head', href: href(['route', r.id]) },
             badge(r, 'lg'),
-            el('div', { class: 'grow' }, el('div', { class: 'title' }, '→ ' + g.head), el('div', { class: 'sub' }, `${g.times.length} отправл. в день`)),
+            el('div', { class: 'grow' }, el('div', { class: 'title' }, '→ ' + g.head), el('div', { class: 'sub' }, `${g.label} · ${g.times.length} отправл.`)),
             icon('chevron'),
           ),
           hourGrid(g.times, now),

@@ -1,5 +1,5 @@
 import { prefs } from '../prefs.ts';
-import { fmtTime, patternTimes, secondsNow } from '../schedule.ts';
+import { fmtTime, patternLabel, patternTimes, secondsNow } from '../schedule.ts';
 import { data, ensureRoutes, routeData, routeIdx } from '../store.ts';
 import type { Pattern } from '../types.ts';
 import {
@@ -16,9 +16,11 @@ import {
 } from './common.ts';
 import { clear, el } from './dom.ts';
 import { href } from './router.ts';
+import { mapPanel } from './map-panel.ts';
+import type { MapPanel } from './map-panel.ts';
 import type { Route as NavRoute } from './router.ts';
 
-type Tab = 'stops' | 'times';
+type Tab = 'stops' | 'times' | 'map';
 
 export async function routeView(root: HTMLElement, nav: NavRoute): Promise<() => void> {
   const id = nav.path[1] ?? '';
@@ -48,7 +50,18 @@ export async function routeView(root: HTMLElement, nav: NavRoute): Promise<() =>
   };
 
   let pi = mainOf(dirs[0]);
-  let tab: Tab = nav.query.get('t') === 'times' ? 'times' : 'stops';
+  // участок «от … до …» (приходит из поиска «Из А в Б»)
+  let seg: { from: number; to: number } | null = null;
+  const qp = Number(nav.query.get('p'));
+  const qi = Number(nav.query.get('i'));
+  const qj = Number(nav.query.get('j'));
+  if (nav.query.get('p') !== null && qp >= 0 && qp < pats.length) {
+    pi = qp;
+    if (qj > qi && qj < pats[qp].stops.length) seg = { from: qi, to: qj };
+  }
+  const qt = nav.query.get('t');
+  let tab: Tab = qt === 'times' ? 'times' : qt === 'map' ? 'map' : 'stops';
+  let mapInst: MapPanel | null = null;
   let pos = 0;
   let date = startOfDay();
   const stopName = (p: Pattern, i: number) => c.stops.name[p.stops[i]];
@@ -70,21 +83,32 @@ export async function routeView(root: HTMLElement, nav: NavRoute): Promise<() =>
 
   const renderDirs = () => {
     clear(dirHost);
+    const nameOf = (st: number) => c.stops.name[st];
     if (dirs.length > 1) {
-      dirHost.appendChild(
-        segmented(
-          dirs.map((d) => ({ value: String(d), label: '→ ' + pats[mainOf(d)].head })),
-          String(pats[pi].dir),
-          (v) => {
-            pi = mainOf(Number(v));
-            pos = 0;
-            renderDirs();
-            renderContent();
-          },
-        ),
-      );
+      const list = el('div', { class: 'dirlist' });
+      for (const d of dirs) {
+        const main = mainOf(d);
+        list.appendChild(
+          el(
+            'button',
+            {
+              class: 'dirbtn' + (pats[pi].dir === d ? ' active' : ''),
+              onclick: () => {
+                pi = main;
+                seg = null;
+                pos = 0;
+                renderDirs();
+                renderContent();
+              },
+            },
+            el('span', { class: 'dirarrow' }, '→'),
+            el('span', { class: 'grow' }, patternLabel(nameOf, pats[main])),
+          ),
+        );
+      }
+      dirHost.appendChild(list);
     } else {
-      dirHost.appendChild(el('div', { class: 'dirtitle' }, '→ ' + pats[pi].head));
+      dirHost.appendChild(el('div', { class: 'dirtitle' }, patternLabel(nameOf, pats[pi])));
     }
     const variants = pats.map((p, i) => ({ p, i })).filter((x) => x.p.dir === pats[pi].dir);
     if (variants.length > 1) {
@@ -96,6 +120,7 @@ export async function routeView(root: HTMLElement, nav: NavRoute): Promise<() =>
       }
       sel.addEventListener('change', () => {
         pi = Number(sel.value);
+        seg = null;
         pos = 0;
         renderContent();
       });
@@ -108,6 +133,7 @@ export async function routeView(root: HTMLElement, nav: NavRoute): Promise<() =>
       [
         { value: 'stops', label: 'Остановки' },
         { value: 'times', label: 'Расписание' },
+        { value: 'map', label: 'Карта' },
       ],
       tab,
       (t) => {
@@ -118,9 +144,21 @@ export async function routeView(root: HTMLElement, nav: NavRoute): Promise<() =>
   );
 
   const renderContent = () => {
+    mapInst?.destroy();
+    mapInst = null;
     clear(content);
     if (tab === 'stops') renderStops();
-    else renderTimes();
+    else if (tab === 'times') renderTimes();
+    else renderMap();
+  };
+
+  const renderMap = () => {
+    const pat = pats[pi];
+    mapInst = mapPanel({ route, pattern: pat, from: seg?.from, to: seg?.to });
+    const note = seg
+      ? el('div', { class: 'meta-line' }, `Участок: ${stopName(pat, seg.from)} → ${stopName(pat, seg.to)} · ${seg.to - seg.from} ост.`)
+      : el('div', { class: 'meta-line' }, `${pat.stops.length} остановок · линия по остановкам (без изгибов улиц)`);
+    content.append(note, mapInst.el);
   };
 
   const renderStops = () => {
@@ -186,5 +224,5 @@ export async function routeView(root: HTMLElement, nav: NavRoute): Promise<() =>
 
   renderDirs();
   renderContent();
-  return () => {};
+  return () => mapInst?.destroy();
 }

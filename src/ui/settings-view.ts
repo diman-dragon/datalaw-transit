@@ -54,6 +54,18 @@ export async function settingsView(root: HTMLElement): Promise<() => void> {
   drawThemes();
   root.appendChild(el('section', { class: 'section' }, el('h3', null, 'Тема'), themeList));
 
+  // ---------- Карта
+  const tilesCheck = el('input', { type: 'checkbox', checked: prefs.mapTiles || undefined });
+  tilesCheck.addEventListener('change', () => prefs.setMapTiles(tilesCheck.checked));
+  root.appendChild(
+    el(
+      'section',
+      { class: 'section' },
+      el('h3', null, 'Карта'),
+      el('div', { class: 'card pad' }, el('label', { class: 'check' }, tilesCheck, el('span', null, 'Подложка OpenStreetMap')), el('p', { class: 'muted small' }, 'Подгружает плитки карты из интернета и показывается только на вкладке «Карта». Без неё маршрут рисуется по остановкам на чистом фоне, интернет не нужен. Данные карты © участники OpenStreetMap.')),
+    ),
+  );
+
   // ---------- Данные
   const status = el('div', { class: 'data-status' });
   const progress = el('div', { class: 'progress', 'aria-live': 'polite' });
@@ -193,7 +205,7 @@ export async function settingsView(root: HTMLElement): Promise<() => void> {
       { class: 'section' },
       el('h3', null, 'Планируется'),
       el('div', { class: 'card' },
-        planned('Построение маршрутов', 'Из точки A в точку B с пересадками и пешими участками', routePlanner !== null),
+        planned('Маршруты с пересадками', 'Из точки A в точку B с пересадками и пешими участками (линии без пересадок уже есть на вкладке «Из А в Б»)', routePlanner !== null),
         planned('Время прибытия', 'Когда реально приедет автобус (сейчас — только плановое расписание)', arrivalProvider().realtime),
       ),
     ),

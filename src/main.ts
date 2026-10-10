@@ -2,6 +2,7 @@ import './styles.css';
 import { prefs } from './prefs.ts';
 import { initStore } from './store.ts';
 import { clear, el, icon } from './ui/dom.ts';
+import { betweenView } from './ui/between-view.ts';
 import { favView } from './ui/fav-view.ts';
 import { parseHash } from './ui/router.ts';
 import type { Route } from './ui/router.ts';
@@ -18,8 +19,9 @@ applyTheme(prefs.theme);
 
 const app = document.getElementById('app')!;
 const view = el('main', { class: 'view', id: 'view' });
-const tabs: { id: string; label: string; href: string; icon: 'search' | 'star' | 'gear' }[] = [
+const tabs: { id: string; label: string; href: string; icon: 'search' | 'route' | 'star' | 'gear' }[] = [
   { id: 'search', label: 'Поиск', href: '#/', icon: 'search' },
+  { id: 'between', label: 'Из А в Б', href: '#/between', icon: 'route' },
   { id: 'fav', label: 'Избранное', href: '#/fav', icon: 'star' },
   { id: 'settings', label: 'Настройки', href: '#/settings', icon: 'gear' },
 ];
@@ -32,6 +34,7 @@ app.append(view, nav);
 
 const views: Record<string, { tab: string; fn: ViewFn }> = {
   '': { tab: 'search', fn: searchView },
+  between: { tab: 'between', fn: betweenView },
   fav: { tab: 'fav', fn: favView },
   settings: { tab: 'settings', fn: settingsView },
   stop: { tab: 'search', fn: stopView },

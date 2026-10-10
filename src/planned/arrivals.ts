@@ -8,12 +8,15 @@
  * интерфейс экрана менять не придётся: он показывает метку источника и задержку.
  */
 import { ctx, ensureRoutes, routeData } from '../store.ts';
-import { dateInt, departuresAt, secondsNow } from '../schedule.ts';
+import { dateInt, departuresAt, patternDest, patternLabel, secondsNow } from '../schedule.ts';
 import { linesAtStop } from '../store.ts';
 
 export interface Arrival {
   route: number;
+  /** куда едет — конечная остановка */
   head: string;
+  /** направление целиком: «Мириево 4 → Дорчол» */
+  label: string;
   /** время отправления по расписанию, секунды от полуночи выбранного дня */
   time: number;
   /** прогноз с учётом задержки (если известен), иначе совпадает с time */
@@ -35,13 +38,18 @@ export const scheduleProvider: ArrivalProvider = {
   realtime: false,
   async arrivals(stop, date) {
     await ensureRoutes(linesAtStop(stop));
-    return departuresAt(ctx(), stop, date).map((d) => ({
+    const cx = ctx();
+    return departuresAt(cx, stop, date).map((d) => {
+      const pat = routeData(d.route).patterns[d.pattern];
+      return {
       route: d.route,
-      head: routeData(d.route).patterns[d.pattern].head,
+      head: patternDest(cx.stopName, pat),
+      label: patternLabel(cx.stopName, pat),
       time: d.time,
       expected: d.time,
       source: 'schedule' as const,
-    }));
+      };
+    });
   },
 };
 
