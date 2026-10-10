@@ -1,0 +1,190 @@
+import { prefs } from '../prefs.ts';
+import { fmtTime, patternTimes, secondsNow } from '../schedule.ts';
+import { data, ensureRoutes, routeData, routeIdx } from '../store.ts';
+import type { Pattern } from '../types.ts';
+import {
+  badge,
+  dayControls,
+  empty,
+  hourGrid,
+  isToday,
+  KIND_LABEL,
+  pageHeader,
+  segmented,
+  startOfDay,
+  starButton,
+} from './common.ts';
+import { clear, el } from './dom.ts';
+import { href } from './router.ts';
+import type { Route as NavRoute } from './router.ts';
+
+type Tab = 'stops' | 'times';
+
+export async function routeView(root: HTMLElement, nav: NavRoute): Promise<() => void> {
+  const id = nav.path[1] ?? '';
+  const ri = routeIdx(id);
+  if (ri === undefined) {
+    root.append(pageHeader({ title: 'Линия', back: true }), empty('Линия не найдена', 'Возможно, после обновления данных она изменилась или была удалена.'));
+    return () => {};
+  }
+  const c = data();
+  const route = c.routes[ri];
+  await ensureRoutes([ri]);
+  const rd = routeData(ri);
+  const pats = rd.patterns;
+  if (!pats.length) {
+    root.append(pageHeader({ title: route.short, back: true }), empty('Нет рейсов', 'У этой линии нет рейсов в загруженных данных.'));
+    return () => {};
+  }
+
+  // основной вариант каждого направления — с наибольшим числом рейсов
+  const dirs = [...new Set(pats.map((p) => p.dir))].sort();
+  const mainOf = (dir: number): number => {
+    let best = -1;
+    pats.forEach((p, i) => {
+      if (p.dir === dir && (best < 0 || p.trips > pats[best].trips)) best = i;
+    });
+    return best;
+  };
+
+  let pi = mainOf(dirs[0]);
+  let tab: Tab = nav.query.get('t') === 'times' ? 'times' : 'stops';
+  let pos = 0;
+  let date = startOfDay();
+  const stopName = (p: Pattern, i: number) => c.stops.name[p.stops[i]];
+
+  const feedName = c.meta.feeds[route.feed]?.name ?? '';
+  root.appendChild(
+    pageHeader({
+      title: el('span', { class: 'route-title' }, badge(route, 'lg'), el('span', null, route.long || route.short)),
+      subtitle: `${KIND_LABEL[route.kind]}${feedName ? ' · ' + feedName : ''}`,
+      back: true,
+      actions: [starButton(prefs.isFavRoute(id), () => prefs.toggleFavRoute(id))],
+    }),
+  );
+
+  const dirHost = el('div', { class: 'pad dirhost' });
+  const tabsHost = el('div', { class: 'pad' });
+  const content = el('div', { class: 'content' });
+  root.append(dirHost, tabsHost, content);
+
+  const renderDirs = () => {
+    clear(dirHost);
+    if (dirs.length > 1) {
+      dirHost.appendChild(
+        segmented(
+          dirs.map((d) => ({ value: String(d), label: '→ ' + pats[mainOf(d)].head })),
+          String(pats[pi].dir),
+          (v) => {
+            pi = mainOf(Number(v));
+            pos = 0;
+            renderDirs();
+            renderContent();
+          },
+        ),
+      );
+    } else {
+      dirHost.appendChild(el('div', { class: 'dirtitle' }, '→ ' + pats[pi].head));
+    }
+    const variants = pats.map((p, i) => ({ p, i })).filter((x) => x.p.dir === pats[pi].dir);
+    if (variants.length > 1) {
+      const sel = el('select', { class: 'select', 'aria-label': 'Вариант маршрута' });
+      for (const { p, i } of variants) {
+        const o = el('option', { value: String(i) }, `${stopName(p, 0)} → ${stopName(p, p.stops.length - 1)} · ${p.trips} рейс.`);
+        if (i === pi) o.selected = true;
+        sel.appendChild(o);
+      }
+      sel.addEventListener('change', () => {
+        pi = Number(sel.value);
+        pos = 0;
+        renderContent();
+      });
+      dirHost.appendChild(el('label', { class: 'field' }, el('span', null, 'Вариант'), sel));
+    }
+  };
+
+  tabsHost.appendChild(
+    segmented<Tab>(
+      [
+        { value: 'stops', label: 'Остановки' },
+        { value: 'times', label: 'Расписание' },
+      ],
+      tab,
+      (t) => {
+        tab = t;
+        renderContent();
+      },
+    ),
+  );
+
+  const renderContent = () => {
+    clear(content);
+    if (tab === 'stops') renderStops();
+    else renderTimes();
+  };
+
+  const renderStops = () => {
+    const pat = pats[pi];
+    const list = el('div', { class: 'timeline' });
+    const today = isToday(date);
+    const now = secondsNow();
+    pat.stops.forEach((s, i) => {
+      let next = '';
+      if (i < pat.stops.length - 1) {
+        const times = patternTimes(c.services, pat, i, date);
+        const t = today ? times.find((x) => x >= now) : times[0];
+        next = t === undefined ? '' : fmtTime(t);
+      }
+      const last = i === pat.stops.length - 1;
+      list.appendChild(
+        el(
+          'a',
+          { class: 'tl-row' + (i === 0 ? ' first' : '') + (last ? ' last' : ''), href: href(['stop', c.stops.id[s]], { r: id }) },
+          el('span', { class: 'tl-dot' }),
+          el('div', { class: 'grow' }, el('div', { class: 'title' }, c.stops.name[s]), c.stops.code[s] ? el('div', { class: 'sub' }, `код ${c.stops.code[s]}`) : null),
+          next ? el('div', { class: 'tl-next' }, el('small', null, today ? 'ближайший' : 'первый'), next) : null,
+        ),
+      );
+    });
+    content.append(
+      el('div', { class: 'meta-line' }, `${pat.stops.length} остановок · ${pat.trips} рейсов в графике`),
+      list,
+      el('div', { class: 'muted pad' }, 'Нажмите на остановку, чтобы увидеть все отправления с неё.'),
+    );
+  };
+
+  const renderTimes = () => {
+    const pat = pats[pi];
+    if (pos >= pat.stops.length - 1) pos = 0;
+    const sel = el('select', { class: 'select', 'aria-label': 'Остановка' });
+    pat.stops.forEach((s, i) => {
+      if (i === pat.stops.length - 1) return; // на конечной отправлений нет
+      const o = el('option', { value: String(i) }, `${i + 1}. ${c.stops.name[s]}${c.stops.code[s] ? ' (' + c.stops.code[s] + ')' : ''}`);
+      if (i === pos) o.selected = true;
+      sel.appendChild(o);
+    });
+    const grid = el('div');
+    const draw = () => {
+      clear(grid);
+      const times = patternTimes(c.services, pat, pos, date);
+      const summary = times.length ? `${times.length} отправл. · первое ${fmtTime(times[0])} · последнее ${fmtTime(times[times.length - 1])}` : 'В этот день рейсов нет';
+      grid.append(el('div', { class: 'meta-line' }, summary), hourGrid(times, isToday(date) ? secondsNow() : null));
+    };
+    sel.addEventListener('change', () => {
+      pos = Number(sel.value);
+      draw();
+    });
+    content.append(
+      el('div', { class: 'controls' }, el('label', { class: 'field' }, el('span', null, 'Остановка'), sel), dayControls(date, (d) => {
+        date = d;
+        draw();
+      })),
+      grid,
+    );
+    draw();
+  };
+
+  renderDirs();
+  renderContent();
+  return () => {};
+}

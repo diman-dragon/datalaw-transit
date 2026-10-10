@@ -1,0 +1,9 @@
+{
+  "appId": "com.datalaw.transit",
+  "appName": "DataLaw Transit",
+  "webDir": "dist",
+  "backgroundColor": "#000000",
+  "android": {
+    "backgroundColor": "#000000"
+  }
+}
