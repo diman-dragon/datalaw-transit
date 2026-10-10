@@ -33,6 +33,14 @@ DEFAULT_VARIANT = "navy"
 # по диагонали (≈1.36 высоты) должны уместиться в 72dp: 0.44*108*1.36 ≈ 65dp (в пределах безопасной зоны 66dp).
 LOGO_FILL = 0.44
 
+# --- транспортный элемент: значок автобуса в янтарном круге рядом с логотипом
+TRANSPORT_BADGE = True
+AMBER = "#F2B33D"
+D_FILL = 0.37          # высота D на холсте 108dp (уменьшена, чтобы освободить место значку)
+D_OFFSET = (-0.055, -0.050)   # сдвиг D влево-вверх, доли от стороны холста
+BADGE_D = 0.225        # диаметр значка, доля от стороны холста
+BADGE_C = (0.635, 0.645)      # центр значка
+
 
 def hex_rgb(h):
     h = h.lstrip("#")
@@ -80,12 +88,67 @@ def place(logo, size, fill, offset=(0, 0)):
     return canvas
 
 
+def bus_badge(d, ink_hex, mono=False):
+    """Круглый значок с автобусом (вид спереди), диаметр d px. mono: белый круг с вырезанным автобусом."""
+    ss = 4
+    D = d * ss
+    disc = Image.new("L", (D, D), 0)
+    ImageDraw.Draw(disc).ellipse((0, 0, D - 1, D - 1), fill=255)
+    g = Image.new("L", (D, D), 0)  # 255 = «чернила» автобуса
+    gd = ImageDraw.Draw(g)
+
+    def box(x0, y0, x1, y1):
+        return (x0 * D, y0 * D, x1 * D, y1 * D)
+
+    gd.rounded_rectangle(box(0.25, 0.20, 0.75, 0.76), radius=0.09 * D, fill=255)  # кузов
+    gd.rectangle(box(0.205, 0.33, 0.25, 0.43), fill=255)  # зеркала
+    gd.rectangle(box(0.75, 0.33, 0.795, 0.43), fill=255)
+    gd.rectangle(box(0.30, 0.72, 0.39, 0.83), fill=255)   # колёса
+    gd.rectangle(box(0.61, 0.72, 0.70, 0.83), fill=255)
+    gd.rounded_rectangle(box(0.31, 0.27, 0.69, 0.50), radius=0.04 * D, fill=0)  # лобовое стекло
+    gd.line(box(0.31, 0.56, 0.69, 0.56), fill=0, width=max(1, int(0.022 * D)))   # полоса бампера
+    for cx in (0.35, 0.65):                                                      # фары
+        gd.ellipse(box(cx - 0.045, 0.62, cx + 0.045, 0.71), fill=0)
+    if mono:
+        alpha = Image.fromarray((np.asarray(disc).astype(np.float32) * (1 - np.asarray(g).astype(np.float32) / 255.0)).astype(np.uint8), "L")
+        out = Image.new("RGBA", (D, D), (255, 255, 255, 0))
+        out.putalpha(alpha)
+    else:
+        out = Image.new("RGBA", (D, D), hex_rgb(AMBER) + (0,))
+        out.putalpha(disc)
+        ink = Image.new("RGBA", (D, D), hex_rgb(ink_hex) + (255,))
+        ink.putalpha(g)
+        out.alpha_composite(ink)
+    return out.resize((d, d), Image.LANCZOS)
+
+
+def compose(logo, bg_hex, size, mono=False):
+    """Передний план иконки (холст size×size = 108dp): логотип D + транспортный значок."""
+    if not TRANSPORT_BADGE:
+        return place(silhouette(logo) if mono else logo, size, LOGO_FILL)
+    off = (int(round(D_OFFSET[0] * size)), int(round(D_OFFSET[1] * size)))
+    base = place(silhouette(logo) if mono else logo, size, D_FILL, off)
+    d = int(round(BADGE_D * size))
+    cx, cy = int(round(BADGE_C[0] * size)), int(round(BADGE_C[1] * size))
+    # вырез вокруг значка, чтобы он не сливался с буквой
+    gap = int(round(d * 1.16))
+    hole = Image.new("L", (size, size), 255)
+    ImageDraw.Draw(hole).ellipse((cx - gap // 2, cy - gap // 2, cx + gap // 2, cy + gap // 2), fill=0)
+    a = np.asarray(base.getchannel("A")).astype(np.float32) * np.asarray(hole).astype(np.float32) / 255.0
+    base.putalpha(Image.fromarray(a.astype(np.uint8), "L"))
+    base.alpha_composite(bus_badge(d, bg_hex, mono), (cx - d // 2, cy - d // 2))
+    return base
+
+
 def legacy_icon(logo, bg, size, round_shape):
-    """Иконка для Android < 8: фон + логотип, скруглённый квадрат или круг."""
+    """Иконка для Android < 8: фон + передний план, скруглённый квадрат или круг."""
     ss = 4  # суперсэмплинг для гладких краёв
     big = size * ss
-    base = Image.new("RGBA", (big, big), hex_rgb(bg) + (255,))
-    base.alpha_composite(place(logo, big, 0.58))
+    full = int(round(big * 108 / 72))  # весь адаптивный холст; видимая часть — центральные 72dp
+    canvas = Image.new("RGBA", (full, full), hex_rgb(bg) + (255,))
+    canvas.alpha_composite(compose(logo, bg, full))
+    o = (full - big) // 2
+    base = canvas.crop((o, o, o + big, o + big))
     mask = Image.new("L", (big, big), 0)
     d = ImageDraw.Draw(mask)
     if round_shape:
@@ -116,8 +179,8 @@ def write_android(variant_key, logo):
     for name, k in densities.items():
         d = os.path.join(res, f"mipmap-{name}")
         os.makedirs(d, exist_ok=True)
-        place(fg, int(108 * k), LOGO_FILL).save(os.path.join(d, "ic_launcher_foreground.png"))
-        place(silhouette(logo), int(108 * k), LOGO_FILL).save(os.path.join(d, "ic_launcher_monochrome.png"))
+        compose(fg, v["bg"], int(108 * k)).save(os.path.join(d, "ic_launcher_foreground.png"))
+        compose(logo, v["bg"], int(108 * k), mono=True).save(os.path.join(d, "ic_launcher_monochrome.png"))
         legacy_icon(fg, v["bg"], int(48 * k), False).save(os.path.join(d, "ic_launcher.png"))
         legacy_icon(fg, v["bg"], int(48 * k), True).save(os.path.join(d, "ic_launcher_round.png"))
     any_dir = os.path.join(res, "mipmap-anydpi-v26")
@@ -162,7 +225,7 @@ def preview(fg, v, path):
             # настоящий адаптивный холст 108dp, видимая часть — центральные 72dp
             full = int(round(big * 108 / 72))
             canvas = Image.new("RGBA", (full, full), hex_rgb(v["bg"]) + (255,))
-            canvas.alpha_composite(place(fg, full, LOGO_FILL))
+            canvas.alpha_composite(compose(fg, v["bg"], full))
             off = (full - big) // 2
             tile = canvas.crop((off, off, off + big, off + big))
             m = Image.new("L", (big, big), 0)

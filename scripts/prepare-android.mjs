@@ -3,7 +3,7 @@
  * Подготовка сгенерированного Capacitor-проекта android/ после `npx cap sync android`:
  *  - копирует иконки из resources/android/res;
  *  - убирает шаблонные иконки, которые мешают (webp / старые векторные);
- *  - прописывает versionName из package.json и versionCode (номер запуска Actions или из версии).
+ *  - прописывает versionName из package.json и versionCode (минуты с 1970 года — всегда растёт, обновление ставится поверх).
  * Скрипт идемпотентный: можно запускать сколько угодно раз.
  */
 import { cpSync, existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -33,11 +33,9 @@ console.log('Иконки DataLaw скопированы.');
 
 // ---- версия
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
-const [maj = 0, min = 0, pat = 0] = String(pkg.version).split('.').map((n) => parseInt(n, 10) || 0);
-const semverCode = maj * 10000 + min * 100 + pat;
-const runNumber = parseInt(process.env.GITHUB_RUN_NUMBER ?? '', 10);
-// versionCode должен только расти, чтобы APK ставился поверх предыдущего
-const versionCode = Number.isFinite(runNumber) ? Math.max(runNumber, 1) + semverCode * 1000 : Math.max(semverCode, 1);
+// versionCode обязан только расти, иначе Android откажется ставить APK поверх установленного.
+// Берём минуты от начала эпохи: растёт монотонно в любом репозитории и при любом номере запуска Actions.
+const versionCode = Math.floor(Date.now() / 60000);
 
 const gradleFile = ['build.gradle', 'build.gradle.kts'].map((f) => join(androidDir, 'app', f)).find((f) => existsSync(f));
 if (!gradleFile) {

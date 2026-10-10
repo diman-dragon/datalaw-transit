@@ -55,17 +55,26 @@ jobs:
         working-directory: android
         run: ./gradlew --no-daemon assembleRelease
 
-      - name: Подпись APK (постоянный ключ из keystore/, чтобы обновления ставились поверх)
+      - name: Подпись APK (один и тот же ключ keystore/ при каждой сборке — приложение обновляется, а не ставится заново)
         env:
-          KS_PASS: ${{ secrets.KEYSTORE_PASSWORD || 'datalaw-transit' }}
+          KS_PASS: datalaw-transit
         run: |
+          if [ ! -f keystore/datalaw-release.jks ]; then
+            echo "::error::Нет файла keystore/datalaw-release.jks. Без него APK будет подписан другим ключом и не обновится поверх установленного."
+            exit 1
+          fi
           VERSION=$(node -p "require('./package.json').version")
           BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           SRC=$(ls android/app/build/outputs/apk/release/*.apk | head -1)
           "$BT/zipalign" -f -p 4 "$SRC" aligned.apk
           "$BT/apksigner" sign --ks keystore/datalaw-release.jks --ks-pass "pass:$KS_PASS" \
             --key-pass "pass:$KS_PASS" --out "DataLaw-Transit-$VERSION.apk" aligned.apk
-          "$BT/apksigner" verify --print-certs "DataLaw-Transit-$VERSION.apk"
+          "$BT/apksigner" verify --print-certs "DataLaw-Transit-$VERSION.apk" | tee cert.txt
+          {
+            echo "### Подпись APK"
+            echo "Отпечаток ключа должен быть одинаковым во всех сборках:"
+            grep "SHA-256" cert.txt | head -1
+          } >> "$GITHUB_STEP_SUMMARY"
           echo "APK_NAME=DataLaw-Transit-$VERSION.apk" >> "$GITHUB_ENV"
 
       - uses: actions/upload-artifact@v4
