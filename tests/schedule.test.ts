@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import { buildDataset } from '../src/gtfs/build.ts';
 import {
   activeServices,
-  departuresAt,
+  dateForKind,
+  dayKindOf,
+  validityOn,
   fmtTime,
-  groupDepartures,
   patternTimes,
   routeCompare,
   routesAtStop,
@@ -15,9 +16,7 @@ import { sampleFeed } from './helpers.ts';
 
 const ds = buildDataset([sampleFeed()]);
 const rdMap = new Map(ds.routeData.map((r) => [r.route, r]));
-const ctx = { services: ds.services, stopIndex: ds.stopIndex, routeData: (r: number) => rdMap.get(r)!, stopName: (s: number) => ds.stops.name[s] };
 const slavija = ds.stops.name.indexOf('Славија');
-const zvezdara = ds.stops.name.indexOf('Звездара');
 const t = (s: number) => fmtTime(s);
 
 test('календарь: будни, выходные, исключения', () => {
@@ -39,30 +38,27 @@ test('календарь: будни, выходные, исключения', (
   assert.equal(out[wd], 0);
 });
 
-test('отправления со Славии в пятницу: будни + ночной рейс четверга после полуночи', () => {
-  const deps = departuresAt(ctx, slavija, new Date(2026, 9, 9));
-  const names = deps.map((d) => `${ds.routes[d.route].short}@${t(d.time)}`);
-  // 00:10 — рейс t3 буднего сервиса четверга (24:10), трамвай 2 в 07:15, автобус 26 в 08:00 и 09:00
-  assert.deepEqual(names, ['26@00:10', '2@07:15', '26@08:00', '26@09:00']);
+test('тип дня: будни, суббота, воскресенье и праздник, работающий по-воскресному', () => {
+  assert.equal(dayKindOf(ds.services, new Date(2026, 9, 9)), 'weekday');
+  assert.equal(dayKindOf(ds.services, new Date(2026, 9, 10)), 'sat');
+  assert.equal(dayKindOf(ds.services, new Date(2026, 9, 11)), 'sun');
+  // 12.10.2026 — понедельник, но по исключению ходит «выходное» расписание (суббота и воскресенье совпадают)
+  assert.notEqual(dayKindOf(ds.services, new Date(2026, 9, 12)), 'weekday');
 });
 
-test('отправления в субботу: рейс t3 из пятницы в 00:10 + выходной рейс t5', () => {
-  const deps = departuresAt(ctx, slavija, new Date(2026, 9, 10));
-  const names = deps.map((d) => `${ds.routes[d.route].short}@${t(d.time)}`);
-  assert.deepEqual(names, ['26@00:10', '26@11:00']);
+test('дата для типа дня: сегодняшний тип — сама сегодняшняя дата', () => {
+  const fri = new Date(2026, 9, 9);
+  assert.equal(dateForKind(ds.services, 'weekday', fri).getTime(), fri.getTime());
+  const sat = dateForKind(ds.services, 'sat', fri);
+  assert.equal(sat.getDay(), 6);
+  const sun = dateForKind(ds.services, 'sun', fri);
+  assert.equal(sun.getDay(), 0);
 });
 
-test('фильтр по линии и группировка по направлению', () => {
+test('срок действия расписания линии на дату', () => {
   const r26 = ds.routes.findIndex((r) => r.short === '26');
-  const deps = departuresAt(ctx, zvezdara, new Date(2026, 9, 9), r26);
-  assert.equal(deps.length, 1);
-  assert.equal(deps[0].time, 10 * 3600);
-  const groups = groupDepartures(ctx, departuresAt(ctx, slavija, new Date(2026, 9, 9)));
-  assert.equal(groups.length, 2);
-  // направление — по конечной остановке, а не по headsign из GTFS
-  assert.deepEqual(groups.map((g) => g.head).sort(), ['Звездара', 'Звездара']);
-  const g26 = groups.find((g) => g.route === r26)!;
-  assert.equal(g26.label, 'Славија → Звездара');
+  const v = validityOn(ds.services, rdMap.get(r26)!.patterns, new Date(2026, 9, 9));
+  assert.deepEqual(v, { from: 20260101, to: 20261231 });
 });
 
 test('patternTimes и routesAtStop', () => {
@@ -81,4 +77,19 @@ test('fmtTime и сортировка номеров линий', () => {
   const tram = { kind: 'tram', short: '12' } as never;
   const bus = { kind: 'bus', short: '1' } as never;
   assert.ok(routeCompare(tram, bus) < 0);
+});
+
+import { dateInt, typicalDate } from '../src/schedule.ts';
+
+test('типичные даты: будни, суббота, воскресенье; праздничные исключения пропускаются', () => {
+  const fri = new Date(2026, 9, 9);
+  assert.equal(dateInt(typicalDate(ds.services, 'weekday', fri)), 20261014); // ближайшая среда
+  assert.equal(dateInt(typicalDate(ds.services, 'sat', new Date(2026, 9, 10))), 20261010);
+  assert.equal(dateInt(typicalDate(ds.services, 'sun', fri)), 20261011);
+  // если на среду приходится исключение календаря — берём следующую
+  const cal = JSON.parse(JSON.stringify(ds.services));
+  cal.add[0] = [...(cal.add[0] ?? []), 20261014];
+  assert.equal(dateInt(typicalDate(cal, 'weekday', fri)), 20261021);
+  // за пределами периода расписания — всё равно возвращает дату нужного дня недели
+  assert.equal(typicalDate(ds.services, 'sat', new Date(2027, 5, 1)).getDay(), 6);
 });

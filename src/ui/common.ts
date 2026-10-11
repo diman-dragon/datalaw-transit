@@ -1,5 +1,8 @@
 import type { Route, RouteKind } from '../types.ts';
-import { addDays, dateInt, fmtTime } from '../schedule.ts';
+import { dateForKind, dateInt, dayKindOf, fmtTime } from '../schedule.ts';
+import type { DayKind, Validity } from '../schedule.ts';
+import { fmtDateInt } from '../compare.ts';
+import { data, hasData } from '../store.ts';
 import { back } from './router.ts';
 import { el, icon } from './dom.ts';
 
@@ -102,7 +105,7 @@ export function segmented<T extends string>(
   return wrap;
 }
 
-const dayFmt = new Intl.DateTimeFormat('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' });
+const dayFmt = new Intl.DateTimeFormat('ru-RU', { weekday: 'short', day: 'numeric', month: 'long' });
 
 export function startOfDay(d = new Date()): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -112,49 +115,77 @@ export function isToday(d: Date): boolean {
   return dateInt(d) === dateInt(new Date());
 }
 
-function toInputValue(d: Date): string {
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${d.getFullYear()}-${m}-${day}`;
-}
+const KIND_BTN: { kind: DayKind; label: string }[] = [
+  { kind: 'weekday', label: 'Будни' },
+  { kind: 'sat', label: 'Суббота' },
+  { kind: 'sun', label: 'Воскресенье' },
+];
 
-/** Выбор дня: «Сегодня / Завтра / дата». */
-export function dayControls(initial: Date, onChange: (d: Date) => void): HTMLElement {
-  let cur = startOfDay(initial);
-  const today = el('button', null, 'Сегодня');
-  const tomorrow = el('button', null, 'Завтра');
-  const input = el('input', { type: 'date', class: 'date-input', 'aria-label': 'Дата' });
-  const label = el('span', { class: 'day-label' });
-  const sync = () => {
-    const t = dateInt(startOfDay());
-    const c = dateInt(cur);
-    today.classList.toggle('active', c === t);
-    tomorrow.classList.toggle('active', c === dateInt(addDays(startOfDay(), 1)));
-    input.value = toInputValue(cur);
-    label.textContent = dayFmt.format(cur);
-  };
-  const set = (d: Date) => {
-    cur = startOfDay(d);
-    sync();
-    onChange(cur);
-  };
-  today.addEventListener('click', () => set(startOfDay()));
-  tomorrow.addEventListener('click', () => set(addDays(startOfDay(), 1)));
-  input.addEventListener('change', () => {
-    const [y, m, d] = input.value.split('-').map(Number);
-    if (y && m && d) set(new Date(y, m - 1, d));
+/**
+ * Выбор типа дня: Будни / Суббота / Воскресенье. Сегодняшний тип помечен точкой и подписью «сегодня»,
+ * он же выбран по умолчанию. Показывает, по какой дате считается расписание.
+ */
+export function dayKindBar(onChange: (kind: DayKind, date: Date) => void, initial?: DayKind): HTMLElement {
+  const cal = data().services;
+  const today = startOfDay();
+  const todayKind = dayKindOf(cal, today);
+  let cur: DayKind = initial ?? todayKind;
+  const label = el('div', { class: 'daykind-note' });
+  const btns = KIND_BTN.map((k) => {
+    const b = el(
+      'button',
+      { role: 'tab', class: 'daykind' + (k.kind === todayKind ? ' is-today' : '') },
+      el('span', null, k.label),
+      k.kind === todayKind ? el('small', null, 'сегодня') : null,
+    );
+    b.addEventListener('click', () => set(k.kind));
+    return { ...k, b };
   });
+  const dateOf = (k: DayKind) => dateForKind(cal, k, today);
+  const sync = () => {
+    for (const x of btns) {
+      x.b.classList.toggle('active', x.kind === cur);
+      x.b.setAttribute('aria-selected', String(x.kind === cur));
+    }
+    const d = dateOf(cur);
+    label.textContent = isToday(d) ? `Сегодня, ${dayFmt.format(d)}` : `По расписанию на ${dayFmt.format(d)}`;
+  };
+  const set = (k: DayKind) => {
+    cur = k;
+    sync();
+    onChange(k, dateOf(k));
+  };
   sync();
-  return el('div', { class: 'daybar' }, el('div', { class: 'segmented small' }, today, tomorrow), label, input);
+  return el('div', { class: 'daykind-bar' }, el('div', { class: 'daykinds', role: 'tablist' }, ...btns.map((x) => x.b)), label);
 }
 
-export function fmtRelative(diffSec: number): string {
-  if (diffSec < 60) return 'сейчас';
-  const m = Math.round(diffSec / 60);
-  if (m < 60) return `через ${m} мин`;
-  const h = Math.floor(m / 60);
-  const mm = m % 60;
-  return mm ? `через ${h} ч ${mm} мин` : `через ${h} ч`;
+/** Исходная дата для начального отображения (до первого выбора). */
+export function initialDate(kind?: DayKind): { kind: DayKind; date: Date } {
+  const cal = data().services;
+  const today = startOfDay();
+  const k = kind ?? dayKindOf(cal, today);
+  return { kind: k, date: dateForKind(cal, k, today) };
+}
+
+export function fmtValidity(v: Validity): string {
+  if (!v.from && !v.to) return '';
+  if (v.from && v.to) return `Действует с ${fmtDateInt(v.from)} по ${fmtDateInt(v.to)}`;
+  if (v.from) return `Действует с ${fmtDateInt(v.from)}`;
+  return `Действует до ${fmtDateInt(v.to)}`;
+}
+
+/** Предупреждение, если срок расписания закончился или оно ещё не началось. */
+export function validityBanner(): HTMLElement | null {
+  if (!hasData()) return null;
+  const today = dateInt(new Date());
+  const feeds = data().meta.feeds;
+  const ends = feeds.map((f) => f.endDate).filter((x) => x > 0);
+  const starts = feeds.map((f) => f.startDate).filter((x) => x > 0);
+  if (ends.length && Math.max(...ends) < today)
+    return el('div', { class: 'banner warn' }, `Срок расписания истёк ${fmtDateInt(Math.max(...ends))}. Обновите данные в настройках.`);
+  if (starts.length && Math.min(...starts) > today)
+    return el('div', { class: 'banner warn' }, `Это расписание начнёт действовать с ${fmtDateInt(Math.min(...starts))}.`);
+  return null;
 }
 
 /** Сетка расписания: час — минуты. now (сек) подсвечивает ближайшее отправление и приглушает прошедшие. */

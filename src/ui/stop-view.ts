@@ -1,28 +1,15 @@
-import { arrivalProvider, etaFromNow } from '../planned/arrivals.ts';
-import type { Arrival } from '../planned/arrivals.ts';
 import { prefs } from '../prefs.ts';
-import { departuresAt, fmtTime, groupDepartures, routeCompare, secondsNow } from '../schedule.ts';
-import { ctx, data, ensureRoutes, linesAtStop, routeIdx, stopIdx } from '../store.ts';
-import {
-  badge,
-  dayControls,
-  empty,
-  fmtRelative,
-  hourGrid,
-  isToday,
-  lineBadges,
-  pageHeader,
-  segmented,
-  startOfDay,
-  starButton,
-} from './common.ts';
+import { fmtTime, patternDest, patternTimes, routeCompare, secondsNow, validityOn } from '../schedule.ts';
+import { data, ensureRoutes, linesAtStop, routeData, stopIdx } from '../store.ts';
+import { badge, dayKindBar, empty, fmtValidity, hourGrid, initialDate, isToday, lineBadges, pageHeader, starButton, validityBanner } from './common.ts';
 import { clear, el, icon } from './dom.ts';
-import { href, replaceQuery } from './router.ts';
+import { href } from './router.ts';
 import type { Route as NavRoute } from './router.ts';
-import { addDays } from '../schedule.ts';
 
-type Tab = 'next' | 'lines';
-
+/**
+ * Остановка: какие линии здесь проходят (без времён по промежуточным остановкам).
+ * Если остановка — начальная для какого-то направления, показываем отправления отсюда.
+ */
 export async function stopView(root: HTMLElement, nav: NavRoute): Promise<() => void> {
   const id = nav.path[1] ?? '';
   const s = stopIdx(id);
@@ -34,12 +21,6 @@ export async function stopView(root: HTMLElement, nav: NavRoute): Promise<() => 
   const lines = linesAtStop(s);
   await ensureRoutes(lines);
 
-  let date = startOfDay();
-  let tab: Tab = nav.query.get('t') === 'lines' ? 'lines' : 'next';
-  let filter: number | undefined = nav.query.get('r') ? routeIdx(nav.query.get('r')!) : undefined;
-  let timer = 0;
-  const body = el('div', { class: 'body' });
-
   const routeObjs = lines.map((i) => c.routes[i]);
   root.appendChild(
     pageHeader({
@@ -49,170 +30,69 @@ export async function stopView(root: HTMLElement, nav: NavRoute): Promise<() => 
       actions: [starButton(prefs.isFavStop(id), () => prefs.toggleFavStop(id))],
     }),
   );
+  const banner = validityBanner();
+  if (banner) root.appendChild(el('div', { class: 'pad' }, banner));
   root.appendChild(el('div', { class: 'pad' }, routeObjs.length ? lineBadges(routeObjs, 14) : null));
-  root.appendChild(body);
 
-  const mount = () => {
-    clear(body);
-    if (filter !== undefined) {
-      const r = c.routes[filter];
-      body.appendChild(
-        el(
-          'div',
-          { class: 'filterbar' },
-          el('span', null, 'Только линия'),
-          badge(r),
-          el(
-            'button',
-            {
-              class: 'icon-btn small',
-              'aria-label': 'Показать все линии',
-              onclick: () => {
-                filter = undefined;
-                replaceQuery(['stop', id], { t: tab === 'lines' ? 'lines' : undefined });
-                mount();
-              },
-            },
-            icon('close'),
-          ),
-        ),
-      );
-    }
-    body.appendChild(
+  if (!lines.length) {
+    root.appendChild(empty('Нет линий', 'На этой остановке нет рейсов в загруженных данных.'));
+    return () => {};
+  }
+
+  // линии на остановке: «номер → конечная»
+  const list = el('div', { class: 'list' });
+  for (const r of lines) {
+    const route = c.routes[r];
+    const dests = new Set<string>();
+    for (const p of routeData(r).patterns) if (p.stops.includes(s)) dests.add(patternDest((x) => c.stops.name[x], p));
+    list.appendChild(
       el(
-        'div',
-        { class: 'controls' },
-        dayControls(date, (d) => {
-          date = d;
-          renderContent();
-        }),
-        segmented<Tab>(
-          [
-            { value: 'next', label: 'Ближайшие' },
-            { value: 'lines', label: 'По линиям' },
-          ],
-          tab,
-          (t) => {
-            tab = t;
-            renderContent();
-          },
-        ),
+        'a',
+        { class: 'row', href: href(['route', route.id]) },
+        badge(route, 'lg'),
+        el('div', { class: 'grow' }, el('div', { class: 'title' }, [...dests].map((d) => '→ ' + d).join('  ·  ')), el('div', { class: 'sub' }, route.long)),
+        icon('chevron'),
       ),
     );
-    body.appendChild(content);
-    renderContent();
-  };
+  }
+  root.appendChild(el('section', { class: 'section' }, el('h3', null, 'Линии на остановке'), list));
 
-  const content = el('div', { class: 'content' });
-  let renderToken = 0;
-  const renderContent = () => {
-    const token = ++renderToken;
-    if (tab === 'next') void renderNext(token);
-    else renderLines();
-  };
-
-  const renderNext = async (token: number) => {
-    const provider = arrivalProvider();
-    let list: Arrival[];
-    try {
-      list = await provider.arrivals(s, date);
-    } catch (e) {
-      clear(content);
-      content.appendChild(empty('Не удалось загрузить расписание', e instanceof Error ? e.message : String(e)));
-      return;
-    }
-    if (token !== renderToken) return;
-    if (filter !== undefined) list = list.filter((a) => a.route === filter);
-    const today = isToday(date);
-    const now = secondsNow();
-    let shown = list;
-    if (today) shown = list.filter((a) => a.expected >= now - 30);
-    const total = shown.length;
-    shown = shown.slice(0, 40);
-    clear(content);
-    if (!shown.length) {
-      content.appendChild(
-        empty(
-          today ? 'На сегодня отправлений больше нет' : 'В этот день отправлений нет',
-          today ? 'Посмотрите расписание на завтра.' : 'Проверьте другую дату — в праздники и выходные расписание отличается.',
-          today
-            ? el(
-                'button',
-                {
-                  class: 'btn',
-                  onclick: () => {
-                    date = addDays(startOfDay(), 1);
-                    mount();
-                  },
-                },
-                'Показать завтра',
-              )
-            : undefined,
-        ),
-      );
-      return;
-    }
-    content.appendChild(
-      el(
-        'div',
-        { class: 'source-note' },
-        icon('clock'),
-        provider.realtime ? 'В реальном времени' : 'По расписанию (без учёта пробок и задержек)',
-      ),
-    );
-    const listEl = el('div', { class: 'list' });
-    for (const a of shown) {
-      const r = c.routes[a.route];
-      const eta = etaFromNow(a, date);
-      listEl.appendChild(
-        el(
-          'a',
-          { class: 'row dep', href: href(['route', r.id]) },
-          el('div', { class: 'time' }, fmtTime(a.expected)),
-          badge(r, 'lg'),
-          el('div', { class: 'grow' }, el('div', { class: 'title' }, '→ ' + a.head), el('div', { class: 'sub' }, a.label)),
-          eta !== null ? el('div', { class: 'eta' + (eta < 300 ? ' soon' : '') }, fmtRelative(Math.max(0, eta))) : null,
-        ),
-      );
-    }
-    content.appendChild(listEl);
-    if (total > shown.length)
-      content.appendChild(el('div', { class: 'muted pad center' }, `Показаны ближайшие ${shown.length} из ${total}. Полный список — на вкладке «По линиям».`));
-  };
-
-  const renderLines = () => {
-    clear(content);
-    const deps = departuresAt(ctx(), s, date, filter);
-    const groups = groupDepartures(ctx(), deps).sort(
-      (a, b) => routeCompare(c.routes[a.route], c.routes[b.route]) || a.head.localeCompare(b.head, 'sr'),
-    );
-    if (!groups.length) {
-      content.appendChild(empty('В этот день отправлений нет', 'Проверьте другую дату — в праздники и выходные расписание отличается.'));
-      return;
-    }
-    const now = isToday(date) ? secondsNow() : null;
-    for (const g of groups) {
-      const r = c.routes[g.route];
-      content.appendChild(
-        el(
-          'section',
-          { class: 'card' },
+  // отправления отсюда: варианты, у которых это начальная остановка
+  const starts: { r: number; p: number }[] = [];
+  for (const r of lines) routeData(r).patterns.forEach((p, pi) => { if (p.stops[0] === s) starts.push({ r, p: pi }); });
+  if (starts.length) {
+    starts.sort((a, b) => routeCompare(c.routes[a.r], c.routes[b.r]));
+    const host = el('div');
+    let { date } = initialDate();
+    const draw = () => {
+      clear(host);
+      const now = isToday(date) ? secondsNow() : null;
+      for (const st of starts) {
+        const rd = routeData(st.r);
+        const pat = rd.patterns[st.p];
+        const times = patternTimes(c.services, pat, 0, date);
+        const v = fmtValidity(validityOn(c.services, rd.patterns, date));
+        host.appendChild(
           el(
-            'a',
-            { class: 'card-head', href: href(['route', r.id]) },
-            badge(r, 'lg'),
-            el('div', { class: 'grow' }, el('div', { class: 'title' }, '→ ' + g.head), el('div', { class: 'sub' }, `${g.label} · ${g.times.length} отправл.`)),
-            icon('chevron'),
+            'section',
+            { class: 'card' },
+            el(
+              'a',
+              { class: 'card-head', href: href(['route', c.routes[st.r].id]) },
+              badge(c.routes[st.r], 'lg'),
+              el('div', { class: 'grow' }, el('div', { class: 'title' }, '→ ' + patternDest((x) => c.stops.name[x], pat)), el('div', { class: 'sub' }, times.length ? `${times.length} отправл. · ${fmtTime(times[0])}–${fmtTime(times[times.length - 1])}` : 'В этот день рейсов нет')),
+              icon('chevron'),
+            ),
+            v ? el('div', { class: 'validity pad-x' }, v) : null,
+            hourGrid(times, now),
           ),
-          hourGrid(g.times, now),
-        ),
-      );
-    }
-  };
-
-  mount();
-  timer = window.setInterval(() => {
-    if (isToday(date)) renderContent();
-  }, 30000);
-  return () => window.clearInterval(timer);
+        );
+      }
+    };
+    root.appendChild(
+      el('section', { class: 'section' }, el('h3', null, 'Отправление отсюда'), dayKindBar((_k, d) => { date = d; draw(); }), host),
+    );
+    draw();
+  }
+  return () => {};
 }

@@ -2,7 +2,6 @@ import { loadCore, loadRouteData } from './db.ts';
 import type { Core } from './db.ts';
 import { SearchIndex } from './search.ts';
 import { routeCompare, routesAtStop } from './schedule.ts';
-import type { ScheduleCtx } from './schedule.ts';
 import type { RouteData } from './types.ts';
 
 let core: Core | null = null;
@@ -65,12 +64,7 @@ export function routeData(r: number): RouteData {
   return rd;
 }
 
-export function ctx(): ScheduleCtx {
-  const c = data();
-  return { services: c.services, stopIndex: c.stopIndex, routeData, stopName: (s) => c.stops.name[s] };
-}
-
-/** Линии, отправляющиеся с остановки, отсортированные по номеру. */
+/** Линии, проходящие через остановку (включая те, что здесь заканчиваются), по номеру. */
 export function linesAtStop(stop: number): number[] {
   const c = data();
   return routesAtStop(c.stopIndex, stop).sort((a, b) => routeCompare(c.routes[a], c.routes[b]));

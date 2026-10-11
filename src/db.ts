@@ -1,4 +1,4 @@
-import type { Dataset, Meta, Route, RouteData, ServiceCalendar, StopIndex, StopsData } from './types.ts';
+import type { Dataset, Meta, Route, RouteData, ServiceCalendar, Snapshot, StopIndex, StopsData } from './types.ts';
 import { DATA_FORMAT } from './types.ts';
 
 const DB_NAME = 'datalaw-transit';
@@ -63,6 +63,7 @@ export async function saveDataset(ds: Dataset): Promise<void> {
   kv.put(ds.routes, 'routes');
   kv.put(ds.stopIndex, 'stopIndex');
   kv.put(ds.services, 'services');
+  kv.put(ds.snapshot, 'snapshot');
   for (const rd of ds.routeData) rs.put(rd, rd.route);
   kv.put(ds.meta, 'meta'); // последним: по нему определяется, что набор целый
   await done(tx);
@@ -79,6 +80,24 @@ export async function loadCore(): Promise<Core | null> {
   ]);
   if (!stops || !routes || !stopIndex || !services) return null;
   return { meta, stops, routes, stopIndex, services };
+}
+
+export async function loadSnapshot(): Promise<Snapshot | null> {
+  const meta = await get<Meta>('kv', 'meta');
+  if (!meta || meta.format !== DATA_FORMAT) return null;
+  return (await get<Snapshot>('kv', 'snapshot')) ?? null;
+}
+
+/** Отчёт последнего обновления (что изменилось) — хранится рядом с данными. */
+export async function saveLastDiff(diff: unknown, at: string): Promise<void> {
+  const db = await open();
+  const tx = db.transaction('kv', 'readwrite');
+  tx.objectStore('kv').put({ diff, at }, 'lastDiff');
+  await done(tx);
+}
+
+export function loadLastDiff<T>(): Promise<{ diff: T; at: string } | undefined> {
+  return get('kv', 'lastDiff');
 }
 
 export function loadRouteData(route: number): Promise<RouteData | undefined> {

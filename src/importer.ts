@@ -1,7 +1,9 @@
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
-import { loadRaw, saveDataset, saveRaw } from './db.ts';
+import { loadCore, loadRaw, loadSnapshot, saveDataset, saveLastDiff, saveRaw } from './db.ts';
 import type { RawInfo } from './db.ts';
-import { loadCore } from './db.ts';
+import { diffSnapshots } from './compare.ts';
+import type { Diff } from './compare.ts';
+import type { Dataset } from './types.ts';
 import { setCore } from './store.ts';
 import type { FeedCfg } from './prefs.ts';
 import type { WorkerMessage, WorkerRequest } from './gtfs/worker.ts';
@@ -43,57 +45,84 @@ export async function downloadZip(url: string): Promise<Uint8Array> {
   return bytes;
 }
 
-export async function importFile(feed: FeedCfg, file: File): Promise<void> {
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  if (!isZip(bytes)) throw new Error('это не zip-архив GTFS');
-  await saveRaw(feed.key, bytes, 'file');
+export interface Staged {
+  key: string;
+  bytes: Uint8Array;
+  source: RawInfo['source'];
 }
 
-export interface UpdateResult {
+/** Подготовленное обновление: данные собраны, но ещё не применены — пользователь сначала смотрит сравнение. */
+export interface Pending {
+  dataset: Dataset;
+  staged: Staged[];
+  diff: Diff;
   warnings: string[];
 }
 
-/** Скачать включённые фиды и пересобрать данные. */
-export async function updateFromNetwork(feeds: FeedCfg[], progress: Progress): Promise<UpdateResult> {
+export async function readZipFile(file: File): Promise<Uint8Array> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (!isZip(bytes)) throw new Error('это не zip-архив GTFS');
+  return bytes;
+}
+
+export interface PrepareOptions {
+  /** какие источники скачать из сети (ключи фидов); остальные берутся из сохранённых файлов */
+  download?: string[];
+  /** файлы, выбранные вручную */
+  files?: Record<string, Uint8Array>;
+}
+
+/**
+ * Скачивает / принимает файлы, собирает набор данных и сравнивает его с текущим.
+ * Ничего не записывает в память телефона до вызова applyPending().
+ */
+export async function prepareUpdate(feeds: FeedCfg[], opt: PrepareOptions, progress: Progress): Promise<Pending> {
   const enabled = feeds.filter((f) => f.enabled);
   if (!enabled.length) throw new Error('Не выбран ни один источник данных');
   const warnings: string[] = [];
-  for (const f of enabled) {
-    progress(`Скачиваю: ${f.name}…`);
-    try {
-      const bytes = await downloadZip(f.url);
-      await saveRaw(f.key, bytes, 'network');
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      const had = await loadRaw(f.key);
-      if (!had) throw new Error(`${f.name}: не удалось скачать — ${msg}`);
-      warnings.push(`${f.name}: не удалось обновить (${msg}), оставлена прежняя версия`);
-    }
-  }
-  await rebuild(feeds, progress);
-  return { warnings };
-}
-
-/** Пересобрать данные из сохранённых zip (после загрузки из файла). */
-export async function rebuild(feeds: FeedCfg[], progress: Progress): Promise<void> {
-  const enabled = feeds.filter((f) => f.enabled);
-  if (!enabled.length) throw new Error('Не выбран ни один источник данных');
+  const staged: Staged[] = [];
   const req: WorkerRequest = { feeds: [] };
   for (const f of enabled) {
-    const raw = await loadRaw(f.key);
-    if (!raw) throw new Error(`${f.name}: нет файла. Нажмите «Скачать» или выберите zip из файла.`);
-    req.feeds.push({ key: f.key, name: f.name, zip: raw.bytes });
+    let bytes: Uint8Array | undefined = opt.files?.[f.key];
+    let source: RawInfo['source'] = 'file';
+    if (!bytes && opt.download?.includes(f.key)) {
+      progress(`Скачиваю: ${f.name}…`);
+      try {
+        bytes = await downloadZip(f.url);
+        source = 'network';
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (!(await loadRaw(f.key))) throw new Error(`${f.name}: не удалось скачать — ${msg}`);
+        warnings.push(`${f.name}: не удалось скачать (${msg}), использована сохранённая версия`);
+      }
+    }
+    if (bytes) staged.push({ key: f.key, bytes, source });
+    else {
+      const raw = await loadRaw(f.key);
+      if (!raw) throw new Error(`${f.name}: нет файла. Нажмите «Скачать» или выберите zip вручную.`);
+      bytes = raw.bytes;
+    }
+    req.feeds.push({ key: f.key, name: f.name, zip: bytes });
   }
   progress('Обработка данных…');
   const dataset = await runWorker(req, progress);
+  progress('Сравниваю с текущими данными…');
+  const diff = diffSnapshots(await loadSnapshot().catch(() => null), dataset.snapshot);
+  return { dataset, staged, diff, warnings };
+}
+
+/** Записать подготовленное обновление в память телефона и переключить приложение на него. */
+export async function applyPending(p: Pending, progress: Progress): Promise<void> {
   progress('Сохранение в память телефона…');
-  await saveDataset(dataset);
+  for (const s of p.staged) await saveRaw(s.key, s.bytes, s.source);
+  await saveDataset(p.dataset);
+  await saveLastDiff(p.diff, new Date().toISOString());
   const core = await loadCore();
   if (!core) throw new Error('Не удалось прочитать сохранённые данные');
   setCore(core);
 }
 
-function runWorker(req: WorkerRequest, progress: Progress): Promise<import('./types.ts').Dataset> {
+function runWorker(req: WorkerRequest, progress: Progress): Promise<Dataset> {
   return new Promise((resolve, reject) => {
     const w = new Worker(new URL('./gtfs/worker.ts', import.meta.url), { type: 'module' });
     w.onmessage = (e: MessageEvent<WorkerMessage>) => {

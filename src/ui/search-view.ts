@@ -2,7 +2,8 @@ import { prefs } from '../prefs.ts';
 import { routeCompare } from '../schedule.ts';
 import { data, hasData, linesAtStop, searchIndex } from '../store.ts';
 import type { RouteKind } from '../types.ts';
-import { badge, empty, KIND_LABEL_PLURAL, lineBadges, pageHeader } from './common.ts';
+import { badge, empty, KIND_LABEL_PLURAL, lineBadges, pageHeader, validityBanner } from './common.ts';
+import { fmtDateInt } from '../compare.ts';
 import { clear, el, icon } from './dom.ts';
 import { go, href } from './router.ts';
 
@@ -12,7 +13,9 @@ let lastKind: RouteKind | 'all' = 'all';
 export function dataSubtitle(): string {
   if (!hasData()) return 'Данных пока нет';
   const m = data().meta;
-  return `${m.routes} линий · ${m.stops} остановок`;
+  const starts = m.feeds.map((f) => f.startDate).filter((x) => x > 0);
+  const since = starts.length ? ` · расписание с ${fmtDateInt(Math.max(...starts))}` : '';
+  return `${m.routes} линий · ${m.stops} остановок${since}`;
 }
 
 export function noDataState(): HTMLElement {
@@ -30,6 +33,8 @@ export function searchView(root: HTMLElement): () => void {
     return () => {};
   }
 
+  const banner = validityBanner();
+  if (banner) root.appendChild(el('div', { class: 'pad' }, banner));
   const input = el('input', {
     type: 'search',
     class: 'search-input',

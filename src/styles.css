@@ -881,134 +881,6 @@ select {
   margin-right: 0;
 }
 
-/* ---------- карта ---------- */
-.mappanel {
-  padding: 0 16px 12px;
-}
-.mapbox {
-  position: relative;
-  height: min(62vh, 520px);
-  min-height: 320px;
-  border-radius: var(--radius);
-  overflow: hidden;
-  border: 1px solid var(--border);
-  background: var(--surface2);
-  touch-action: none;
-}
-.map,
-.map canvas {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-}
-.map-overlay {
-  touch-action: none;
-}
-:root[data-theme='amoled'] .map.has-tiles .map-tiles {
-  filter: invert(1) hue-rotate(180deg) brightness(0.8) contrast(0.9) saturate(0.6);
-}
-:root[data-theme='sand'] .map.has-tiles .map-tiles {
-  filter: sepia(0.35) saturate(0.85);
-}
-.map-controls {
-  position: absolute;
-  right: 10px;
-  top: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.map-btn {
-  width: 42px;
-  height: 42px;
-  display: grid;
-  place-items: center;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--text);
-  cursor: pointer;
-  opacity: 0.94;
-}
-.map-btn:active {
-  background: var(--surface2);
-}
-.map-attr {
-  position: absolute;
-  left: 8px;
-  bottom: 6px;
-  font-size: 11px;
-  color: var(--muted);
-  background: color-mix(in srgb, var(--bg) 70%, transparent);
-  padding: 1px 6px;
-  border-radius: 6px;
-  pointer-events: none;
-}
-.map-info {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-top: 10px;
-  padding: 10px 14px;
-  min-height: 56px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-
-/* ---------- «Из А в Б» ---------- */
-.between {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 8px 0 16px;
-}
-.picker {
-  position: relative;
-  margin: 6px 0;
-}
-.searchbar.flat {
-  position: static;
-  margin: 0;
-  height: 48px;
-}
-.suggest {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 52px;
-  z-index: 20;
-  max-height: 55vh;
-  overflow-y: auto;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-}
-.suggest-item {
-  display: flex;
-  width: 100%;
-  text-align: left;
-  padding: 10px 14px;
-  border: 0;
-  border-bottom: 1px solid var(--border);
-  background: transparent;
-  cursor: pointer;
-}
-.suggest-item:last-child {
-  border-bottom: 0;
-}
-.swap {
-  flex: none;
-}
-.result .map-hint {
-  color: var(--accent);
-}
-.result .next3 b {
-  font-variant-numeric: tabular-nums;
-}
-
 /* ---------- выбор направления ---------- */
 .dirlist {
   display: flex;
@@ -1034,4 +906,121 @@ select {
 }
 .dirarrow {
   color: var(--accent);
+}
+
+/* ---------- тип дня ---------- */
+.daykind-bar {
+  padding: 0 16px 8px;
+}
+.daykinds {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+.daykind {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  min-height: 48px;
+  padding: 6px 4px;
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 600;
+  cursor: pointer;
+}
+.daykind small {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+}
+.daykind.active {
+  border-color: var(--accent);
+  background: var(--surface2);
+}
+.daykind-note {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.start-stop {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 16px 0;
+}
+.start-stop small {
+  color: var(--muted);
+}
+.validity {
+  padding: 4px 16px;
+  font-size: 13px;
+  color: var(--accent);
+  font-weight: 600;
+}
+.validity.pad-x {
+  padding: 0 16px 6px;
+}
+
+/* ---------- предупреждения и сравнение ---------- */
+.banner {
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  font-size: 14px;
+  white-space: pre-line;
+}
+.banner.warn {
+  border-color: var(--accent);
+}
+.btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.diff {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.diff-validity {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+.diff-validity div {
+  display: flex;
+  flex-direction: column;
+}
+.diff-validity small {
+  color: var(--muted);
+}
+.diff-summary {
+  font-weight: 600;
+}
+.diff-block summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 4px 0;
+}
+.diff-block ul {
+  margin: 4px 0 4px 18px;
+  padding: 0;
+}
+.diff-block li {
+  margin: 3px 0;
+  font-size: 14px;
+}
+.pending {
+  margin-top: 12px;
+}
+.pending-card h4 {
+  margin: 0 0 10px;
+}
+.feed-valid {
+  margin-top: 8px;
 }

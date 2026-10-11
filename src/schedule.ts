@@ -38,22 +38,6 @@ export function activeServices(cal: ServiceCalendar, d: Date): Uint8Array {
   return out;
 }
 
-export interface Departure {
-  /** секунды от полуночи выбранного дня, 0..86399 */
-  time: number;
-  route: number;
-  pattern: number;
-  trip: number;
-  pos: number;
-}
-
-export interface ScheduleCtx {
-  services: ServiceCalendar;
-  stopIndex: StopIndex;
-  routeData: (route: number) => RouteData;
-  stopName: (stop: number) => string;
-}
-
 /** Направление варианта линии: «Начальная → Конечная». */
 export function patternLabel(stopName: (s: number) => string, p: Pattern): string {
   return `${stopName(p.stops[0])} → ${stopName(p.stops[p.stops.length - 1])}`;
@@ -73,30 +57,6 @@ export function routesAtStop(stopIndex: StopIndex, stop: number): number[] {
   return [...seen];
 }
 
-/** Все отправления с остановки на выбранную дату (с учётом рейсов «за полночь» с прошлого дня). */
-export function departuresAt(ctx: ScheduleCtx, stop: number, date: Date, onlyRoute?: number): Departure[] {
-  const today = activeServices(ctx.services, date);
-  const prev = activeServices(ctx.services, addDays(date, -1));
-  const list = ctx.stopIndex[stop] ?? [];
-  const out: Departure[] = [];
-  for (let k = 0; k < list.length; k += 3) {
-    const r = list[k];
-    if (onlyRoute !== undefined && r !== onlyRoute) continue;
-    const p = list[k + 1];
-    const pos = list[k + 2];
-    const pat = ctx.routeData(r).patterns[p];
-    const n = pat.stops.length;
-    for (let t = 0; t < pat.trips; t++) {
-      const time = pat.times[t * n + pos];
-      const s = pat.svc[t];
-      if (time < DAY && today[s]) out.push({ time, route: r, pattern: p, trip: t, pos });
-      else if (time >= DAY && prev[s]) out.push({ time: time - DAY, route: r, pattern: p, trip: t, pos });
-    }
-  }
-  out.sort((a, b) => a.time - b.time || a.route - b.route);
-  return out;
-}
-
 /** Времена отправления варианта линии с позиции pos на дату. */
 export function patternTimes(cal: ServiceCalendar, pat: Pattern, pos: number, date: Date): number[] {
   const today = activeServices(cal, date);
@@ -111,33 +71,6 @@ export function patternTimes(cal: ServiceCalendar, pat: Pattern, pos: number, da
   }
   out.sort((a, b) => a - b);
   return out;
-}
-
-export interface DepartureGroup {
-  route: number;
-  /** конечная остановка («куда едет») */
-  head: string;
-  /** направление целиком: «Мириево 4 → Дорчол» */
-  label: string;
-  times: number[];
-}
-
-/** Группировка отправлений по (линия, конечная остановка). */
-export function groupDepartures(ctx: ScheduleCtx, deps: Departure[]): DepartureGroup[] {
-  const map = new Map<string, DepartureGroup & { best: number }>();
-  for (const d of deps) {
-    const pat = ctx.routeData(d.route).patterns[d.pattern];
-    const head = patternDest(ctx.stopName, pat);
-    const key = `${d.route}|${head}`;
-    let g = map.get(key);
-    if (!g) map.set(key, (g = { route: d.route, head, label: '', times: [], best: -1 }));
-    if (pat.trips > g.best) {
-      g.best = pat.trips;
-      g.label = patternLabel(ctx.stopName, pat);
-    }
-    g.times.push(d.time);
-  }
-  return [...map.values()].map(({ best: _b, ...g }) => g);
 }
 
 export function fmtTime(sec: number): string {
@@ -170,4 +103,84 @@ export function shortCompare(a: string, b: string): number {
   if (ma) return -1;
   if (mb) return 1;
   return a.localeCompare(b, 'sr', { numeric: true });
+}
+
+// ---------- типы дней: будни / суббота / воскресенье
+
+export type DayKind = 'weekday' | 'sat' | 'sun';
+
+const KIND_DOW: Record<DayKind, number> = { weekday: 2, sat: 5, sun: 6 }; // среда, суббота, воскресенье
+
+const excCache = new WeakMap<ServiceCalendar, Set<number>>();
+
+function exceptionDates(cal: ServiceCalendar): Set<number> {
+  let s = excCache.get(cal);
+  if (!s) {
+    s = new Set<number>();
+    for (const k in cal.add) for (const d of cal.add[k]) s.add(d);
+    for (const k in cal.remove) for (const d of cal.remove[k]) s.add(d);
+    excCache.set(cal, s);
+  }
+  return s;
+}
+
+/**
+ * Ближайшая «обычная» дата нужного типа (среда / суббота / воскресенье), начиная с `from`.
+ * Праздничные исключения календаря и даты вне периода действия расписания пропускаются.
+ */
+export function typicalDate(cal: ServiceCalendar, kind: DayKind, from: Date): Date {
+  const exc = exceptionDates(cal);
+  let first: Date | null = null;
+  for (let i = 0; i < 120; i++) {
+    const d = addDays(from, i);
+    if (dowMon0(d) !== KIND_DOW[kind]) continue;
+    first ??= d;
+    if (exc.has(dateInt(d))) continue;
+    if (activeServices(cal, d).some((x) => x === 1)) return d;
+  }
+  return first ?? from;
+}
+
+/** Какой тип дня сегодня: по реальным действующим сервисам (праздник, работающий по-воскресному, определяется верно). */
+export function dayKindOf(cal: ServiceCalendar, d: Date): DayKind {
+  const act = activeServices(cal, d);
+  const key = (a: Uint8Array) => a.join('');
+  const mine = key(act);
+  const dow = dowMon0(d);
+  const natural: DayKind = dow === 5 ? 'sat' : dow === 6 ? 'sun' : 'weekday';
+  if (!act.some((x) => x === 1)) return natural;
+  if (key(activeServices(cal, typicalDate(cal, natural, d))) === mine) return natural;
+  for (const k of ['weekday', 'sat', 'sun'] as DayKind[]) {
+    if (key(activeServices(cal, typicalDate(cal, k, d))) === mine) return k;
+  }
+  return natural;
+}
+
+/** Дата, по которой показываем расписание для типа дня: сегодня — сама сегодняшняя дата, иначе ближайший «обычный» день. */
+export function dateForKind(cal: ServiceCalendar, kind: DayKind, today: Date): Date {
+  return dayKindOf(cal, today) === kind ? today : typicalDate(cal, kind, today);
+}
+
+export interface Validity {
+  /** yyyymmdd, 0 — неизвестно */
+  from: number;
+  to: number;
+}
+
+/** Срок действия расписания линий на дату: последнее начало и ближайшее окончание среди действующих сервисов. */
+export function validityOn(cal: ServiceCalendar, patterns: Pattern[], d: Date): Validity {
+  const act = activeServices(cal, d);
+  const seen = new Set<number>();
+  let from = 0;
+  let to = 0;
+  for (const p of patterns)
+    for (let t = 0; t < p.trips; t++) {
+      const s = p.svc[t];
+      if (seen.has(s)) continue;
+      seen.add(s);
+      if (!act[s]) continue;
+      if (cal.start[s] > from) from = cal.start[s];
+      if (cal.end[s] && (!to || cal.end[s] < to)) to = cal.end[s];
+    }
+  return { from, to };
 }

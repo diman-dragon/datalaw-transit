@@ -45,12 +45,13 @@ test('buildDataset: линии, варианты, остановки, индек
   assert.deepEqual([...p1.times], [10 * 3600, 10 * 3600, 10 * 3600 + 1200]);
   assert.equal(p1.head, 'Славија');
 
-  // индекс: на последней остановке варианта отправлений нет
+  // индекс содержит все остановки вариантов, включая конечные: Звездара — конец направления 0 и начало направления 1
   const zvezdara = ds.stops.name.indexOf('Звездара');
   const atZvezdara = ds.stopIndex[zvezdara] ?? [];
-  // только направление 1 (начинается на Звездаре)
-  assert.equal(atZvezdara.length, 3);
-  assert.equal(ds.stops.name[ds.routeData.find((x) => x.route === atZvezdara[0])!.patterns[atZvezdara[1]].stops[atZvezdara[2]]], 'Звездара');
+  assert.equal(atZvezdara.length % 3, 0);
+  const poss = [];
+  for (let k = 0; k < atZvezdara.length; k += 3) if (atZvezdara[k] === r26) poss.push(atZvezdara[k + 2]);
+  assert.deepEqual(poss.sort(), [0, 2]);
 });
 
 test('buildDataset: несколько фидов не смешивают идентификаторы', () => {

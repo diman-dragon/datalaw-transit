@@ -1,5 +1,6 @@
 import { IntBuf, parseCsv, parseTime } from './csv.ts';
 import { DATA_FORMAT } from '../types.ts';
+import { makeSnapshot } from '../compare.ts';
 import type {
   Dataset,
   FeedInput,
@@ -50,7 +51,7 @@ function need(files: Record<string, Uint8Array>, name: string, feed: string): Ui
 }
 
 export function buildDataset(feeds: FeedInput[], progress: (msg: string) => void = () => {}): Dataset {
-  const stops: StopsData = { id: [], code: [], name: [], lat: [], lon: [] };
+  const stops: StopsData = { id: [], code: [], name: [] };
   const routes: Route[] = [];
   const routeData: RouteData[] = [];
   const stopIndex: StopIndex = {};
@@ -64,9 +65,9 @@ export function buildDataset(feeds: FeedInput[], progress: (msg: string) => void
 
     // ---- stops
     progress(`${label}: остановки`);
-    const stopInfo = new Map<string, { code: string; name: string; lat: number; lon: number }>();
-    parseCsv(need(F, 'stops.txt', label), ['stop_id', 'stop_code', 'stop_name', 'stop_lat', 'stop_lon'], (v) => {
-      stopInfo.set(v[0], { code: v[1].trim(), name: v[2].trim(), lat: +v[3] || 0, lon: +v[4] || 0 });
+    const stopInfo = new Map<string, { code: string; name: string }>();
+    parseCsv(need(F, 'stops.txt', label), ['stop_id', 'stop_code', 'stop_name'], (v) => {
+      stopInfo.set(v[0], { code: v[1].trim(), name: v[2].trim() });
     });
 
     // ---- routes
@@ -224,8 +225,6 @@ export function buildDataset(feeds: FeedInput[], progress: (msg: string) => void
         stops.id.push(`${feed.key}:${id}`);
         stops.code.push(info?.code ?? '');
         stops.name.push(info?.name || id);
-        stops.lat.push(info?.lat ?? 0);
-        stops.lon.push(info?.lon ?? 0);
       }
       return g;
     };
@@ -312,7 +311,7 @@ export function buildDataset(feeds: FeedInput[], progress: (msg: string) => void
         return { dir: pb.dir, head, stops: gstops, trips: pb.trips.length, svc, times };
       });
       out.forEach((p, pi) => {
-        for (let pos = 0; pos < p.stops.length - 1; pos++) {
+        for (let pos = 0; pos < p.stops.length; pos++) {
           const s = p.stops[pos];
           (stopIndex[s] ??= []).push(routeIdx, pi, pos);
         }
@@ -339,19 +338,16 @@ export function buildDataset(feeds: FeedInput[], progress: (msg: string) => void
     });
   });
 
-  return {
-    meta: {
-      format: DATA_FORMAT,
-      builtAt: new Date().toISOString(),
-      feeds: feedsMeta,
-      stops: stops.id.length,
-      routes: routes.length,
-      trips: totalTrips,
-    },
-    stops,
-    routes,
-    routeData,
-    stopIndex,
-    services,
+  const builtAt = new Date().toISOString();
+  const meta = {
+    format: DATA_FORMAT,
+    builtAt,
+    feeds: feedsMeta,
+    stops: stops.id.length,
+    routes: routes.length,
+    trips: totalTrips,
   };
+  const ds: Dataset = { meta, stops, routes, routeData, stopIndex, services, snapshot: { builtAt, feeds: [], refDates: { weekday: 0, sat: 0, sun: 0 }, lines: [] } };
+  ds.snapshot = makeSnapshot(ds);
+  return ds;
 }

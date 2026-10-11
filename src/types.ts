@@ -1,5 +1,5 @@
 /** Формат хранимых данных. Меняйте DATA_FORMAT при несовместимых изменениях. */
-export const DATA_FORMAT = 1;
+export const DATA_FORMAT = 3;
 
 export type RouteKind = 'bus' | 'tram' | 'trolley' | 'rail' | 'other';
 
@@ -7,8 +7,6 @@ export interface StopsData {
   id: string[];
   code: string[];
   name: string[];
-  lat: number[];
-  lon: number[];
 }
 
 export interface Route {
@@ -82,6 +80,8 @@ export interface Dataset {
   routeData: RouteData[];
   stopIndex: StopIndex;
   services: ServiceCalendar;
+  /** краткий слепок расписания для сравнения при обновлении */
+  snapshot: Snapshot;
 }
 
 export interface FeedInput {
@@ -89,4 +89,30 @@ export interface FeedInput {
   name: string;
   /** файлы GTFS по базовому имени, например 'stops.txt' */
   files: Record<string, Uint8Array>;
+}
+
+export type DayKindKey = 'weekday' | 'sat' | 'sun';
+
+/** Направление линии в слепке: основной вариант, отправления от начальной остановки (минуты от полуночи). */
+export interface SnapDir {
+  from: string;
+  to: string;
+  stops: number;
+  times: Record<DayKindKey, number[]>;
+}
+
+export interface SnapLine {
+  key: string;
+  short: string;
+  long: string;
+  kind: RouteKind;
+  dirs: SnapDir[];
+}
+
+export interface Snapshot {
+  builtAt: string;
+  feeds: { key: string; name: string; version: string; startDate: number; endDate: number }[];
+  /** даты (yyyymmdd), по которым считались будни / суббота / воскресенье */
+  refDates: Record<DayKindKey, number>;
+  lines: SnapLine[];
 }

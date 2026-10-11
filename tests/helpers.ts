@@ -33,13 +33,13 @@ wd,20261012,2
 we,20261012,1
 `),
       'trips.txt': b(`
-route_id,service_id,trip_id,trip_headsign,direction_id
-r26,wd,t1,Звездара,0
-r26,wd,t2,Звездара,0
-r26,wd,t3,Звездара,0
-r26,wd,t4,Славија,1
-r26,we,t5,Звездара,0
-r2,wd,t6,Калемегдан,0
+route_id,service_id,trip_id,trip_headsign,direction_id,shape_id
+r26,wd,t1,Звездара,0,sh1
+r26,wd,t2,Звездара,0,sh1
+r26,wd,t3,Звездара,0,sh1
+r26,wd,t4,Славија,1,sh2
+r26,we,t5,Звездара,0,sh1
+r2,wd,t6,Калемегдан,0,
 `),
       // t3 — ночной рейс: 24:10, 24:20, 24:30 (после полуночи), строки намеренно перемешаны
       'stop_times.txt': b(`

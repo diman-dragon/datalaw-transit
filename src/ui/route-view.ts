@@ -1,26 +1,26 @@
 import { prefs } from '../prefs.ts';
-import { fmtTime, patternLabel, patternTimes, secondsNow } from '../schedule.ts';
+import { fmtTime, patternLabel, patternTimes, secondsNow, validityOn } from '../schedule.ts';
 import { data, ensureRoutes, routeData, routeIdx } from '../store.ts';
 import type { Pattern } from '../types.ts';
 import {
   badge,
-  dayControls,
+  dayKindBar,
   empty,
+  fmtValidity,
   hourGrid,
+  initialDate,
   isToday,
   KIND_LABEL,
   pageHeader,
   segmented,
-  startOfDay,
   starButton,
+  validityBanner,
 } from './common.ts';
 import { clear, el } from './dom.ts';
 import { href } from './router.ts';
-import { mapPanel } from './map-panel.ts';
-import type { MapPanel } from './map-panel.ts';
 import type { Route as NavRoute } from './router.ts';
 
-type Tab = 'stops' | 'times' | 'map';
+type Tab = 'times' | 'stops';
 
 export async function routeView(root: HTMLElement, nav: NavRoute): Promise<() => void> {
   const id = nav.path[1] ?? '';
@@ -50,20 +50,8 @@ export async function routeView(root: HTMLElement, nav: NavRoute): Promise<() =>
   };
 
   let pi = mainOf(dirs[0]);
-  // участок «от … до …» (приходит из поиска «Из А в Б»)
-  let seg: { from: number; to: number } | null = null;
-  const qp = Number(nav.query.get('p'));
-  const qi = Number(nav.query.get('i'));
-  const qj = Number(nav.query.get('j'));
-  if (nav.query.get('p') !== null && qp >= 0 && qp < pats.length) {
-    pi = qp;
-    if (qj > qi && qj < pats[qp].stops.length) seg = { from: qi, to: qj };
-  }
-  const qt = nav.query.get('t');
-  let tab: Tab = qt === 'times' ? 'times' : qt === 'map' ? 'map' : 'stops';
-  let mapInst: MapPanel | null = null;
-  let pos = 0;
-  let date = startOfDay();
+  let tab: Tab = nav.query.get('t') === 'stops' ? 'stops' : 'times';
+  let { kind, date } = initialDate();
   const stopName = (p: Pattern, i: number) => c.stops.name[p.stops[i]];
 
   const feedName = c.meta.feeds[route.feed]?.name ?? '';
@@ -75,6 +63,8 @@ export async function routeView(root: HTMLElement, nav: NavRoute): Promise<() =>
       actions: [starButton(prefs.isFavRoute(id), () => prefs.toggleFavRoute(id))],
     }),
   );
+  const banner = validityBanner();
+  if (banner) root.appendChild(el('div', { class: 'pad' }, banner));
 
   const dirHost = el('div', { class: 'pad dirhost' });
   const tabsHost = el('div', { class: 'pad' });
@@ -95,8 +85,6 @@ export async function routeView(root: HTMLElement, nav: NavRoute): Promise<() =>
               class: 'dirbtn' + (pats[pi].dir === d ? ' active' : ''),
               onclick: () => {
                 pi = main;
-                seg = null;
-                pos = 0;
                 renderDirs();
                 renderContent();
               },
@@ -120,8 +108,6 @@ export async function routeView(root: HTMLElement, nav: NavRoute): Promise<() =>
       }
       sel.addEventListener('change', () => {
         pi = Number(sel.value);
-        seg = null;
-        pos = 0;
         renderContent();
       });
       dirHost.appendChild(el('label', { class: 'field' }, el('span', null, 'Вариант'), sel));
@@ -131,9 +117,8 @@ export async function routeView(root: HTMLElement, nav: NavRoute): Promise<() =>
   tabsHost.appendChild(
     segmented<Tab>(
       [
-        { value: 'stops', label: 'Остановки' },
         { value: 'times', label: 'Расписание' },
-        { value: 'map', label: 'Карта' },
+        { value: 'stops', label: 'Остановки' },
       ],
       tab,
       (t) => {
@@ -144,79 +129,46 @@ export async function routeView(root: HTMLElement, nav: NavRoute): Promise<() =>
   );
 
   const renderContent = () => {
-    mapInst?.destroy();
-    mapInst = null;
     clear(content);
     if (tab === 'stops') renderStops();
-    else if (tab === 'times') renderTimes();
-    else renderMap();
-  };
-
-  const renderMap = () => {
-    const pat = pats[pi];
-    mapInst = mapPanel({ route, pattern: pat, from: seg?.from, to: seg?.to });
-    const note = seg
-      ? el('div', { class: 'meta-line' }, `Участок: ${stopName(pat, seg.from)} → ${stopName(pat, seg.to)} · ${seg.to - seg.from} ост.`)
-      : el('div', { class: 'meta-line' }, `${pat.stops.length} остановок · линия по остановкам (без изгибов улиц)`);
-    content.append(note, mapInst.el);
+    else renderTimes();
   };
 
   const renderStops = () => {
     const pat = pats[pi];
     const list = el('div', { class: 'timeline' });
-    const today = isToday(date);
-    const now = secondsNow();
     pat.stops.forEach((s, i) => {
-      let next = '';
-      if (i < pat.stops.length - 1) {
-        const times = patternTimes(c.services, pat, i, date);
-        const t = today ? times.find((x) => x >= now) : times[0];
-        next = t === undefined ? '' : fmtTime(t);
-      }
       const last = i === pat.stops.length - 1;
       list.appendChild(
         el(
           'a',
-          { class: 'tl-row' + (i === 0 ? ' first' : '') + (last ? ' last' : ''), href: href(['stop', c.stops.id[s]], { r: id }) },
+          { class: 'tl-row' + (i === 0 ? ' first' : '') + (last ? ' last' : ''), href: href(['stop', c.stops.id[s]]) },
           el('span', { class: 'tl-dot' }),
           el('div', { class: 'grow' }, el('div', { class: 'title' }, c.stops.name[s]), c.stops.code[s] ? el('div', { class: 'sub' }, `код ${c.stops.code[s]}`) : null),
-          next ? el('div', { class: 'tl-next' }, el('small', null, today ? 'ближайший' : 'первый'), next) : null,
         ),
       );
     });
-    content.append(
-      el('div', { class: 'meta-line' }, `${pat.stops.length} остановок · ${pat.trips} рейсов в графике`),
-      list,
-      el('div', { class: 'muted pad' }, 'Нажмите на остановку, чтобы увидеть все отправления с неё.'),
-    );
+    content.append(el('div', { class: 'meta-line' }, `${pat.stops.length} остановок`), list);
   };
 
   const renderTimes = () => {
     const pat = pats[pi];
-    if (pos >= pat.stops.length - 1) pos = 0;
-    const sel = el('select', { class: 'select', 'aria-label': 'Остановка' });
-    pat.stops.forEach((s, i) => {
-      if (i === pat.stops.length - 1) return; // на конечной отправлений нет
-      const o = el('option', { value: String(i) }, `${i + 1}. ${c.stops.name[s]}${c.stops.code[s] ? ' (' + c.stops.code[s] + ')' : ''}`);
-      if (i === pos) o.selected = true;
-      sel.appendChild(o);
-    });
     const grid = el('div');
     const draw = () => {
       clear(grid);
-      const times = patternTimes(c.services, pat, pos, date);
+      const times = patternTimes(c.services, pat, 0, date);
+      const v = fmtValidity(validityOn(c.services, pats, date));
       const summary = times.length ? `${times.length} отправл. · первое ${fmtTime(times[0])} · последнее ${fmtTime(times[times.length - 1])}` : 'В этот день рейсов нет';
+      grid.append(el('div', { class: 'start-stop' }, el('small', null, 'Отправление от конечной'), el('b', null, stopName(pat, 0))));
+      if (v) grid.append(el('div', { class: 'validity' }, v));
       grid.append(el('div', { class: 'meta-line' }, summary), hourGrid(times, isToday(date) ? secondsNow() : null));
     };
-    sel.addEventListener('change', () => {
-      pos = Number(sel.value);
-      draw();
-    });
     content.append(
-      el('div', { class: 'controls' }, el('label', { class: 'field' }, el('span', null, 'Остановка'), sel), dayControls(date, (d) => {
+      dayKindBar((k, d) => {
+        kind = k;
         date = d;
         draw();
-      })),
+      }, kind),
       grid,
     );
     draw();
@@ -224,5 +176,5 @@ export async function routeView(root: HTMLElement, nav: NavRoute): Promise<() =>
 
   renderDirs();
   renderContent();
-  return () => mapInst?.destroy();
+  return () => {};
 }
