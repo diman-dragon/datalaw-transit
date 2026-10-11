@@ -2,7 +2,7 @@ import { DAY_KIND_NAME, diffSummary, fmtDateInt, kindName } from '../compare.ts'
 import type { Diff } from '../compare.ts';
 import { el } from './dom.ts';
 
-function period(v: { start: number; end: number } | null): string {
+export function period(v: { start: number; end: number } | null): string {
   if (!v) return '—';
   return `${fmtDateInt(v.start)} – ${fmtDateInt(v.end)}`;
 }

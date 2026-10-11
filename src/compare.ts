@@ -37,6 +37,22 @@ function hm(min: number): string {
   return `${h < 10 ? '0' : ''}${h}:${m < 10 ? '0' : ''}${m}`;
 }
 
+/**
+ * Устойчивый ключ линии для сравнения: «вид:номер», при повторе номера — с суффиксом #2, #3…
+ * Порядок совпадает с ds.routeData (а он — с ds.routes), поэтому ключ можно искать по индексу линии.
+ */
+export function routeKeys(ds: Dataset): string[] {
+  const used = new Map<string, number>();
+  return ds.routeData.map((rd) => {
+    const r = ds.routes[rd.route];
+    let key = `${r.kind}:${r.short}`;
+    const n = used.get(key) ?? 0;
+    used.set(key, n + 1);
+    if (n) key += `#${n + 1}`;
+    return key;
+  });
+}
+
 export function makeSnapshot(ds: Dataset, today: Date = new Date()): Snapshot {
   const t0 = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   const starts = ds.meta.feeds.map((f) => f.startDate).filter((x) => x > 0);
@@ -52,14 +68,11 @@ export function makeSnapshot(ds: Dataset, today: Date = new Date()): Snapshot {
     refDates[k] = dateToInt(refs[k]);
   }
 
-  const used = new Map<string, number>();
+  const keys = routeKeys(ds);
   const lines: SnapLine[] = [];
-  for (const rd of ds.routeData) {
+  for (const [ri, rd] of ds.routeData.entries()) {
     const r = ds.routes[rd.route];
-    let key = `${r.kind}:${r.short}`;
-    const n = used.get(key) ?? 0;
-    used.set(key, n + 1);
-    if (n) key += `#${n + 1}`;
+    const key = keys[ri];
     const dirs: SnapDir[] = [];
     const dirIds = [...new Set(rd.patterns.map((p) => p.dir))].sort();
     for (const d of dirIds) {
@@ -83,6 +96,7 @@ export function makeSnapshot(ds: Dataset, today: Date = new Date()): Snapshot {
 }
 
 export interface LineChange {
+  key: string;
   short: string;
   kind: RouteKind;
   notes: string[];
@@ -93,8 +107,8 @@ export interface Diff {
   first: boolean;
   oldValidity: { start: number; end: number } | null;
   newValidity: { start: number; end: number };
-  added: { short: string; kind: RouteKind; long: string }[];
-  removed: { short: string; kind: RouteKind; long: string }[];
+  added: { key: string; short: string; kind: RouteKind; long: string }[];
+  removed: { key: string; short: string; kind: RouteKind; long: string }[];
   changed: LineChange[];
   same: number;
   refDates: { old: Record<DayKind, number> | null; new: Record<DayKind, number> };
@@ -120,7 +134,7 @@ function countDiff(a: number[], b: number[]): { added: number; removed: number }
   return { added, removed };
 }
 
-function plural(n: number, one: string, few: string, many: string): string {
+export function plural(n: number, one: string, few: string, many: string): string {
   const m10 = n % 10;
   const m100 = n % 100;
   if (m10 === 1 && m100 !== 11) return one;
@@ -173,8 +187,8 @@ export function diffSnapshots(oldS: Snapshot | null, newS: Snapshot): Diff {
   }
   const oldBy = new Map(oldS.lines.map((l) => [l.key, l]));
   const newBy = new Map(newS.lines.map((l) => [l.key, l]));
-  const added = newS.lines.filter((l) => !oldBy.has(l.key)).map(({ short, kind, long }) => ({ short, kind, long }));
-  const removed = oldS.lines.filter((l) => !newBy.has(l.key)).map(({ short, kind, long }) => ({ short, kind, long }));
+  const added = newS.lines.filter((l) => !oldBy.has(l.key)).map(({ key, short, kind, long }) => ({ key, short, kind, long }));
+  const removed = oldS.lines.filter((l) => !newBy.has(l.key)).map(({ key, short, kind, long }) => ({ key, short, kind, long }));
   const changed: LineChange[] = [];
   let same = 0;
   for (const nl of newS.lines) {
@@ -189,7 +203,7 @@ export function diffSnapshots(oldS: Snapshot | null, newS: Snapshot): Diff {
       else if (n) notes.push(`Появилось направление ${n.from} → ${n.to}`);
       else if (o) notes.push(`Убрано направление ${o.from} → ${o.to}`);
     }
-    if (notes.length) changed.push({ short: nl.short, kind: nl.kind, notes });
+    if (notes.length) changed.push({ key: nl.key, short: nl.short, kind: nl.kind, notes });
     else same++;
   }
   return {
