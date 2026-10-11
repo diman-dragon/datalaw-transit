@@ -1,10 +1,9 @@
-import { clearDataset, clearRaw, loadCustomLayer, loadLastDiff, loadRawInfos } from '../db.ts';
+import { clearDataset, clearRaw, loadLastDiff, loadRawInfos } from '../db.ts';
 import type { RawInfo } from '../db.ts';
-import { applyCustom, applyPending, loadStoredCustom, prepareCustom, prepareUpdate, readZipFile } from '../importer.ts';
-import type { CustomPending, Pending, PrepareOptions } from '../importer.ts';
-import type { Choice, CustomLayer } from '../overlay.ts';
-import { customPanel } from './custom-panel.ts';
+import { applyPending, prepareUpdate, readCustomFile, readZipFile } from '../importer.ts';
+import type { Pending, PrepareOptions } from '../importer.ts';
 import { fmtDateInt } from '../compare.ts';
+import { formatTransitions, parseTransitions } from '../remind.ts';
 import type { Diff } from '../compare.ts';
 import { diffPanel } from './diff-panel.ts';
 import { prefs } from '../prefs.ts';
@@ -60,16 +59,10 @@ export async function settingsView(root: HTMLElement): Promise<() => void> {
   const feedsHost = el('div', { class: 'feeds' });
   const updateBtn = el('button', { class: 'btn primary wide' }, icon('download'), 'Скачать / обновить все источники');
   const rebuildBtn = el('button', { class: 'btn wide' }, 'Пересобрать из сохранённых файлов');
-  const fileInput = el('input', { type: 'file', accept: '.zip,application/zip', class: 'hidden' });
+  const fileInput = el('input', { type: 'file', class: 'hidden' });
   let busy = false;
   let fileFeed: FeedCfg | null = null;
   let pending: Pending | null = null;
-  // свой файл расписания
-  const customHost = el('div', { class: 'custom-host' });
-  const customPendingHost = el('div', { class: 'pending' });
-  const customInput = el('input', { type: 'file', accept: '.zip,application/zip', class: 'hidden' });
-  let customPending: CustomPending | null = null;
-  let layer: CustomLayer | undefined = await loadCustomLayer().catch(() => undefined);
 
   const setBusy = (b: boolean) => {
     busy = b;
@@ -102,7 +95,6 @@ export async function settingsView(root: HTMLElement): Promise<() => void> {
         'div',
         { class: 'card pad pending-card' },
         el('h4', null, 'Новые данные готовы — проверьте и примените'),
-        p.dropCustom ? el('div', { class: 'banner' }, 'Свой файл будет убран из приложения, данные вернутся к официальным.') : null,
         diffPanel(p.diff),
         p.warnings.length ? el('div', { class: 'banner warn' }, p.warnings.join('\n')) : null,
         el(
@@ -155,114 +147,50 @@ export async function settingsView(root: HTMLElement): Promise<() => void> {
     );
   };
 
-  const drawCustomPending = () => {
-    clear(customPendingHost);
-    const cp = customPending;
-    if (!cp) return;
-    customPendingHost.appendChild(
-      el(
-        'div',
-        { class: 'card pad pending-card' },
-        el('h4', null, `Свой файл «${cp.fileName}» — сравнение с текущим расписанием`),
-        customPanel(cp, {
-          onApply: async (choices) => {
-            if (busy) return;
-            setBusy(true);
-            try {
-              await applyCustom(cp, choices, (m) => report(m));
-              customPending = null;
-              report('Готово. Свой файл применён.', 'ok');
-            } catch (e) {
-              report('Ошибка: ' + (e instanceof Error ? e.message : String(e)), 'err');
-            } finally {
-              setBusy(false);
-              await refresh();
-            }
-          },
-          onCancel: () => {
-            customPending = null;
-            report('Отменено. Прежние данные не тронуты.', 'info');
-            drawCustomPending();
-          },
-        }),
-      ),
-    );
-  };
-
-  const drawCustom = () => {
-    clear(customHost);
-    customHost.appendChild(el('h4', { class: 'group-title' }, 'Свой файл расписания'));
-    customHost.appendChild(
-      el(
-        'p',
-        { class: 'muted small' },
-        'Загрузите свой GTFS (zip): приложение сравнит его с текущим расписанием по линиям, а по каждому отличию вы выберете, какая версия останется. Сначала должны быть загружены официальные данные.',
-      ),
-    );
-    const pick = () => {
-      if (!hasData()) {
-        report('Сначала загрузите официальное расписание: свой файл сравнивается с ним.', 'err');
-        return;
-      }
-      customInput.value = '';
-      customInput.click();
-    };
-    if (layer) {
-      const mine = Object.values(layer.choices).filter((c) => c === 'custom').length;
-      customHost.appendChild(
-        el(
-          'div',
-          { class: 'feed' },
-          el('b', null, `«${layer.fileName}»`),
-          el('div', { class: 'muted small' }, `${fmtSize(layer.size)}, загружен ${dtFmt.format(new Date(layer.savedAt))}`),
-          el('div', { class: 'muted small' }, `Выбрана своя версия для линий: ${mine}. При обновлении официальных данных этот выбор применяется заново.`),
-          el(
-            'div',
-            { class: 'btn-row' },
-            el('button', { class: 'btn small', onclick: () => void reviewCustom() }, 'Пересмотреть выбор'),
-            el('button', { class: 'btn small', onclick: pick }, icon('file'), 'Заменить файл…'),
-            el('button', { class: 'btn small danger', onclick: () => void run({ dropCustom: true }) }, 'Убрать свой файл'),
-          ),
-        ),
-      );
-    } else {
-      const b = el('button', { class: 'btn wide', onclick: pick }, icon('file'), 'Загрузить свой файл…');
-      if (!hasData()) b.classList.add('is-off');
-      customHost.appendChild(b);
-    }
-  };
-
   const drawFeeds = () => {
     clear(feedsHost);
     for (const f of prefs.feeds()) {
       const info = infos[f.key];
-      const url = el('input', { type: 'url', class: 'text-input', value: f.url, spellcheck: 'false', autocapitalize: 'off', 'aria-label': 'Ссылка на GTFS zip' });
-      url.addEventListener('change', () => prefs.setFeed(f.key, { url: url.value }));
       const check = el('input', { type: 'checkbox', checked: f.enabled || undefined });
       check.addEventListener('change', () => prefs.setFeed(f.key, { enabled: check.checked }));
+      const pick = (accept: string) => {
+        fileFeed = prefs.feeds().find((x) => x.key === f.key) ?? null;
+        fileInput.accept = accept;
+        fileInput.value = '';
+        fileInput.click();
+      };
+      let tools: HTMLElement;
+      if (f.custom) {
+        tools = el(
+          'details',
+          { open: !info || undefined },
+          el('summary', null, 'Загрузка файла'),
+          el('p', { class: 'muted small' }, 'JSON-файл datalaw-schedule.json, который делает скрипт tools/collect_gsp.py (см. README). Файл можно скачать на телефон и выбрать здесь.'),
+          el('div', { class: 'btn-row' }, el('button', { class: 'btn small', onclick: () => pick('.json,application/json') }, icon('file'), 'Выбрать файл расписания…')),
+        );
+      } else {
+        const url = el('input', { type: 'url', class: 'text-input', value: f.url, spellcheck: 'false', autocapitalize: 'off', 'aria-label': 'Ссылка на GTFS zip' });
+        url.addEventListener('change', () => prefs.setFeed(f.key, { url: url.value }));
+        tools = el(
+          'details',
+          null,
+          el('summary', null, 'Ссылка и ручная загрузка'),
+          url,
+          el(
+            'div',
+            { class: 'btn-row' },
+            el('button', { class: 'btn small', onclick: () => void run({ download: [f.key] }) }, icon('download'), 'Скачать этот источник'),
+            el('button', { class: 'btn small', onclick: () => pick('.zip,application/zip') }, icon('file'), 'Выбрать zip вручную…'),
+          ),
+        );
+      }
       feedsHost.appendChild(
         el(
           'div',
           { class: 'feed' },
           el('label', { class: 'check' }, check, el('span', null, f.name)),
           el('div', { class: 'muted small' }, info ? `Файл: ${fmtSize(info.size)}, ${info.source === 'file' ? 'выбран вручную' : 'скачан'} ${dtFmt.format(new Date(info.savedAt))}` : 'Файл ещё не загружен'),
-          el(
-            'details',
-            null,
-            el('summary', null, 'Ссылка и ручная загрузка'),
-            url,
-            el('div', { class: 'btn-row' },
-              el('button', { class: 'btn small', onclick: () => void run({ download: [f.key] }) }, icon('download'), 'Скачать этот источник'),
-              el('button', {
-                class: 'btn small',
-                onclick: () => {
-                  fileFeed = prefs.feeds().find((x) => x.key === f.key) ?? null;
-                  fileInput.value = '';
-                  fileInput.click();
-                },
-              }, icon('file'), 'Выбрать zip вручную…'),
-            ),
-          ),
+          tools,
         ),
       );
     }
@@ -276,12 +204,9 @@ export async function settingsView(root: HTMLElement): Promise<() => void> {
 
   const refresh = async () => {
     Object.assign(infos, await loadRawInfos().catch(() => ({})));
-    layer = await loadCustomLayer().catch(() => undefined);
     drawStatus();
     drawFeeds();
     drawPending();
-    drawCustom();
-    drawCustomPending();
     await drawLast();
     setBusy(busy);
   };
@@ -291,9 +216,7 @@ export async function settingsView(root: HTMLElement): Promise<() => void> {
     if (busy) return;
     setBusy(true);
     pending = null;
-    customPending = null;
     drawPending();
-    drawCustomPending();
     report('Начинаю…');
     try {
       pending = await prepareUpdate(prefs.feeds(), opt, (m) => report(m));
@@ -307,52 +230,7 @@ export async function settingsView(root: HTMLElement): Promise<() => void> {
     }
   };
 
-  /** Собрать свой файл, сравнить с текущими данными и показать выбор версий. Применяется отдельной кнопкой. */
-  const runCustom = async (file: { fileName: string; bytes: Uint8Array }, previous?: Record<string, Choice>) => {
-    if (busy) return;
-    setBusy(true);
-    pending = null;
-    customPending = null;
-    drawPending();
-    drawCustomPending();
-    report('Начинаю…');
-    try {
-      customPending = await prepareCustom(prefs.feeds(), file, (m) => report(m), previous);
-      report('Свой файл сравнён с текущими данными, но ещё не применён. Выберите версии ниже.', 'ok');
-    } catch (e) {
-      report('Ошибка: ' + (e instanceof Error ? e.message : String(e)), 'err');
-    } finally {
-      drawCustomPending();
-      setBusy(false);
-    }
-  };
-
-  const reviewCustom = async () => {
-    if (busy) return;
-    const st = await loadStoredCustom();
-    if (!st) {
-      report('Сохранённый свой файл не найден. Загрузите его заново.', 'err');
-      return;
-    }
-    await runCustom({ fileName: st.fileName, bytes: st.bytes }, st.choices);
-  };
-
-  customInput.addEventListener('change', async () => {
-    const file = customInput.files?.[0];
-    if (!file || busy) return;
-    if (!hasData()) {
-      report('Сначала загрузите официальное расписание: свой файл сравнивается с ним.', 'err');
-      return;
-    }
-    try {
-      report(`Читаю файл ${file.name}…`);
-      await runCustom({ fileName: file.name, bytes: await readZipFile(file) });
-    } catch (e) {
-      report('Ошибка: ' + (e instanceof Error ? e.message : String(e)), 'err');
-    }
-  });
-
-  updateBtn.addEventListener('click', () => void run({ download: prefs.feeds().filter((f) => f.enabled).map((f) => f.key) }));
+  updateBtn.addEventListener('click', () => void run({ download: prefs.feeds().filter((f) => f.enabled && !f.custom).map((f) => f.key) }));
   rebuildBtn.addEventListener('click', () => void run({}));
 
   fileInput.addEventListener('change', async () => {
@@ -361,7 +239,14 @@ export async function settingsView(root: HTMLElement): Promise<() => void> {
     if (!file || !feed || busy) return;
     try {
       report(`Читаю файл ${file.name}…`);
-      const bytes = await readZipFile(file);
+      const bytes = feed.custom ? await readCustomFile(file) : await readZipFile(file);
+      if (feed.custom) {
+        prefs.setFeed(feed.key, { enabled: true });
+        const gtfsOn = prefs.feeds().filter((x) => !x.custom && x.enabled);
+        if (gtfsOn.length && confirm('Отключить GTFS-источники, чтобы линии не дублировались? (Рекомендуется: расписание будет только из вашего файла.)'))
+          for (const x of gtfsOn) prefs.setFeed(x.key, { enabled: false });
+        drawFeeds();
+      }
       await run({ files: { [feed.key]: bytes } });
     } catch (e) {
       report('Ошибка: ' + (e instanceof Error ? e.message : String(e)), 'err');
@@ -378,8 +263,6 @@ export async function settingsView(root: HTMLElement): Promise<() => void> {
         await clearRaw();
         setCore(null);
         pending = null;
-        customPending = null;
-        layer = undefined;
         for (const k of Object.keys(infos)) delete infos[k];
         report('Данные удалены.', 'ok');
       } catch (e) {
@@ -393,7 +276,6 @@ export async function settingsView(root: HTMLElement): Promise<() => void> {
 
   drawStatus();
   drawFeeds();
-  drawCustom();
   void drawLast();
   root.appendChild(
     el(
@@ -405,10 +287,38 @@ export async function settingsView(root: HTMLElement): Promise<() => void> {
       lastHost,
       el('h4', { class: 'group-title' }, 'Источники'),
       feedsHost,
-      customHost,
-      customInput,
-      customPendingHost,
       wipe,
+    ),
+  );
+
+  // ---------- Напоминания
+  const rc = prefs.remind();
+  const remindOn = el('input', { type: 'checkbox', checked: rc.on || undefined });
+  remindOn.addEventListener('change', () => prefs.setRemind({ on: remindOn.checked, hiddenUntil: 0 }));
+  const remindDates = el('input', { type: 'text', class: 'text-input', value: rc.dates, placeholder: '15.06, 01.09', spellcheck: 'false', 'aria-label': 'Даты смены расписания' });
+  const remindHint = el('div', { class: 'muted small' });
+  const showHint = () => {
+    const t = parseTransitions(remindDates.value);
+    remindHint.textContent = t.length ? `Напоминание за 7 дней до: ${formatTransitions(t)}` : 'Дат нет — напоминать о смене не буду (о конце срока и старых данных напомню всё равно).';
+  };
+  remindDates.addEventListener('change', () => {
+    prefs.setRemind({ dates: formatTransitions(parseTransitions(remindDates.value)), hiddenUntil: 0 });
+    showHint();
+  });
+  showHint();
+  root.appendChild(
+    el(
+      'section',
+      { class: 'section' },
+      el('h3', null, 'Напоминания'),
+      el(
+        'div',
+        { class: 'card pad' },
+        el('label', { class: 'check' }, remindOn, el('span', null, 'Напоминать скачать новое расписание')),
+        el('p', { class: 'muted small' }, 'Приложение ничего не скачивает само — только показывает напоминание сверху: перед сменой зимнего и летнего расписания, когда срок данных кончается или данные давно не обновлялись. Напоминание видно при открытии приложения.'),
+        el('label', { class: 'field' }, el('span', null, 'Даты смены расписания (день.месяц через запятую)'), remindDates),
+        remindHint,
+      ),
     ),
   );
 

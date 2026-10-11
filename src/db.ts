@@ -1,5 +1,3 @@
-import { CUSTOM_FEED_KEY } from './overlay.ts';
-import type { CustomLayer } from './overlay.ts';
 import type { Dataset, Meta, Route, RouteData, ServiceCalendar, Snapshot, StopIndex, StopsData } from './types.ts';
 import { DATA_FORMAT } from './types.ts';
 
@@ -148,37 +146,5 @@ export async function clearRaw(): Promise<void> {
   const db = await open();
   const tx = db.transaction('raw', 'readwrite');
   tx.objectStore('raw').clear();
-  await done(tx);
-}
-
-export async function deleteRaw(key: string): Promise<void> {
-  const db = await open();
-  const tx = db.transaction('raw', 'readwrite');
-  tx.objectStore('raw').delete(key);
-  await done(tx);
-}
-
-// ---- свой файл расписания: решения по конфликтам (сам zip лежит в raw под ключом CUSTOM_FEED_KEY)
-
-/** Файл и решения пишутся одной транзакцией: в памяти не бывает нового zip со старыми решениями (и наоборот). */
-export async function saveCustom(layer: CustomLayer, bytes: Uint8Array): Promise<void> {
-  const db = await open();
-  const tx = db.transaction(['kv', 'raw'], 'readwrite');
-  tx.objectStore('kv').put(layer, 'customLayer');
-  const info: RawInfo = { savedAt: layer.savedAt, size: bytes.length, source: 'file' };
-  tx.objectStore('raw').put({ info, bytes }, CUSTOM_FEED_KEY);
-  await done(tx);
-}
-
-export async function loadCustomLayer(): Promise<CustomLayer | undefined> {
-  const l = await get<CustomLayer>('kv', 'customLayer');
-  return l && typeof l.fileName === 'string' && l.choices ? l : undefined;
-}
-
-export async function deleteCustomLayer(): Promise<void> {
-  const db = await open();
-  const tx = db.transaction(['kv', 'raw'], 'readwrite');
-  tx.objectStore('kv').delete('customLayer');
-  tx.objectStore('raw').delete(CUSTOM_FEED_KEY);
   await done(tx);
 }

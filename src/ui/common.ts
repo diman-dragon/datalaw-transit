@@ -3,7 +3,9 @@ import { dateForKind, dateInt, dayKindOf, fmtTime } from '../schedule.ts';
 import type { DayKind, Validity } from '../schedule.ts';
 import { fmtDateInt } from '../compare.ts';
 import { data, hasData } from '../store.ts';
-import { back } from './router.ts';
+import { back, go } from './router.ts';
+import { prefs } from '../prefs.ts';
+import { parseTransitions, reminders } from '../remind.ts';
 import { el, icon } from './dom.ts';
 
 export const KIND_LABEL: Record<RouteKind, string> = {
@@ -174,18 +176,40 @@ export function fmtValidity(v: Validity): string {
   return `Действует до ${fmtDateInt(v.to)}`;
 }
 
-/** Предупреждение, если срок расписания закончился или оно ещё не началось. */
+/**
+ * Напоминание сверху экрана: смена расписания, окончание срока, старые данные.
+ * Приложение само ничего не скачивает — только просит сделать это в настройках.
+ */
 export function validityBanner(): HTMLElement | null {
   if (!hasData()) return null;
-  const today = dateInt(new Date());
-  const feeds = data().meta.feeds;
-  const ends = feeds.map((f) => f.endDate).filter((x) => x > 0);
-  const starts = feeds.map((f) => f.startDate).filter((x) => x > 0);
-  if (ends.length && Math.max(...ends) < today)
-    return el('div', { class: 'banner warn' }, `Срок расписания истёк ${fmtDateInt(Math.max(...ends))}. Обновите данные в настройках.`);
+  const now = new Date();
+  const today = dateInt(now);
+  const m = data().meta;
+  const starts = m.feeds.map((f) => f.startDate).filter((x) => x > 0);
   if (starts.length && Math.min(...starts) > today)
     return el('div', { class: 'banner warn' }, `Это расписание начнёт действовать с ${fmtDateInt(Math.min(...starts))}.`);
-  return null;
+  const cfg = prefs.remind();
+  if (!cfg.on || cfg.hiddenUntil >= today) return null;
+  const list = reminders({ today: now, builtAt: m.builtAt, feeds: m.feeds, transitions: parseTransitions(cfg.dates) });
+  if (!list.length) return null;
+  const box = el(
+    'div',
+    { class: 'banner warn remind' },
+    el('div', null, list[0].text),
+    el(
+      'div',
+      { class: 'btn-row' },
+      el('button', { class: 'btn small primary', onclick: () => go(['settings']) }, icon('download'), 'Скачать новое'),
+      el('button', {
+        class: 'btn small',
+        onclick: () => {
+          prefs.setRemind({ hiddenUntil: today });
+          box.remove();
+        },
+      }, 'Напомнить завтра'),
+    ),
+  );
+  return box;
 }
 
 /** Сетка расписания: час — минуты. now (сек) подсвечивает ближайшее отправление и приглушает прошедшие. */

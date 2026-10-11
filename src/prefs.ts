@@ -5,6 +5,8 @@ export interface FeedCfg {
   name: string;
   url: string;
   enabled: boolean;
+  /** источник — свой файл расписания (json), без ссылки */
+  custom?: boolean;
 }
 
 export const DEFAULT_FEEDS: FeedCfg[] = [
@@ -20,7 +22,24 @@ export const DEFAULT_FEEDS: FeedCfg[] = [
     url: 'https://data.gov.rs/sr/datasets/r/60f82229-16c7-4939-961b-2c24873d3e06',
     enabled: true,
   },
+  {
+    key: 'g',
+    name: 'Свой файл расписания (gsp.rs)',
+    url: '',
+    enabled: false,
+    custom: true,
+  },
 ];
+
+export interface RemindCfg {
+  on: boolean;
+  /** даты смены расписания «дд.мм, дд.мм» */
+  dates: string;
+  /** yyyymmdd — до этого дня баннер скрыт («Позже») */
+  hiddenUntil: number;
+}
+
+export const DEFAULT_REMIND: RemindCfg = { on: true, dates: '15.06, 01.09', hiddenUntil: 0 };
 
 interface Stored {
   theme: ThemeName;
@@ -28,6 +47,7 @@ interface Stored {
   favRoutes: string[];
   feeds: Pick<FeedCfg, 'key' | 'url' | 'enabled'>[];
   recents: string[];
+  remind: RemindCfg;
 }
 
 const KEY = 'datalaw-transit/prefs/v1';
@@ -39,6 +59,7 @@ function defaults(): Stored {
     favRoutes: [],
     feeds: DEFAULT_FEEDS.map((f) => ({ key: f.key, url: f.url, enabled: f.enabled })),
     recents: [],
+    remind: { ...DEFAULT_REMIND },
   };
 }
 
@@ -54,6 +75,12 @@ function load(): Stored {
       if (p.theme === 'amoled' || p.theme === 'sand') d.theme = p.theme;
       if (Array.isArray(p.favStops)) d.favStops = p.favStops.filter((x) => typeof x === 'string');
       if (Array.isArray(p.favRoutes)) d.favRoutes = p.favRoutes.filter((x) => typeof x === 'string');
+      if (p.remind && typeof p.remind === 'object') {
+        const r = p.remind as Partial<RemindCfg>;
+        if (typeof r.on === 'boolean') d.remind.on = r.on;
+        if (typeof r.dates === 'string') d.remind.dates = r.dates;
+        if (typeof r.hiddenUntil === 'number') d.remind.hiddenUntil = r.hiddenUntil;
+      }
       if (Array.isArray(p.recents)) d.recents = p.recents.filter((x) => typeof x === 'string').slice(0, 12);
       if (Array.isArray(p.feeds)) {
         for (const f of p.feeds) {
@@ -100,6 +127,11 @@ export const prefs = {
     if (!f) return;
     if (patch.url !== undefined) f.url = patch.url.trim() || DEFAULT_FEEDS.find((x) => x.key === key)!.url;
     if (patch.enabled !== undefined) f.enabled = patch.enabled;
+    save();
+  },
+  remind: (): RemindCfg => ({ ...load().remind }),
+  setRemind(patch: Partial<RemindCfg>): void {
+    Object.assign(load().remind, patch);
     save();
   },
   isFavStop: (id: string): boolean => load().favStops.includes(id),
