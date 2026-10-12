@@ -120,6 +120,12 @@ export function parseChangesList(html: string): Change[] {
 
 /** Текст со страницы «Опширније»: всё между периодом действия и блоком «Зона радова» / выбором линии. */
 export function parseChangeDetail(html: string): string {
+  const ed = extractEditor(html);
+  if (ed) {
+    const t = toText(ed.replace(/([:;.])[ \t]+- /g, '$1\n- '));
+    const out = t.split('\n').map(oneLine).filter(Boolean).join('\n');
+    if (out) return out.slice(0, 6000);
+  }
   const text = toText(html);
   const p = PERIOD.exec(text);
   if (!p) return '';
@@ -140,11 +146,28 @@ export function parseChangeDetail(html: string): string {
   return lines.join('\n').slice(0, 6000);
 }
 
+/** Содержимое <div class="editor"> (так сайт оборачивает текст объявления) — с учётом вложенных div. */
+function extractEditor(html: string): string {
+  const m = /<div[^>]*class=["'][^"']*\beditor\b[^"']*["'][^>]*>/i.exec(html);
+  if (!m) return '';
+  const start = m.index + m[0].length;
+  const re = /<(\/?)div\b[^>]*>/gi;
+  re.lastIndex = start;
+  let depth = 1;
+  for (let t = re.exec(html); t; t = re.exec(html)) {
+    depth += t[1] ? -1 : 1;
+    if (depth === 0) return html.slice(start, t.index).replace(/<!--[\s\S]*?-->/g, '');
+  }
+  return '';
+}
+
 /**
  * HTML тела объявления: от периода действия до блока «Зона радова» / выбора линии (сырой фрагмент — очищает sanitizeHtml).
  * Пусто, если периода на странице нет.
  */
 export function extractDetailHtml(html: string): string {
+  const ed = extractEditor(html);
+  if (ed) return ed;
   const body = html.replace(/<(script|style)[\s\S]*?<\/\1>/gi, '').replace(/<!--[\s\S]*?-->/g, '');
   const p = PERIOD.exec(body);
   if (!p) return '';

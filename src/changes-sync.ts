@@ -22,6 +22,8 @@ export interface RefreshResult {
   skipped: number;
   /** тексты, которые не удалось скачать (повторятся при следующем обновлении) */
   failed: number;
+  /** причина первой ошибки, если была */
+  reason: string;
 }
 
 export async function initChanges(): Promise<void> {
@@ -91,6 +93,7 @@ export function refreshChanges(all: boolean, progress: (m: string) => void = () 
 
     let added = 0;
     let failed = 0;
+    let reason = '';
     for (let i = 0; i < todo.length; i += 4) {
       if (!(await isWifi())) {
         failed += todo.length - i;
@@ -108,10 +111,13 @@ export function refreshChanges(all: boolean, progress: (m: string) => void = () 
               detail = parseChangeDetail(raw);
               pageHtml = sanitizeHtml(extractDetailHtml(raw));
             }
-          } catch {
-            /* повторим при следующем обновлении */
+          } catch (e) {
+            reason ||= e instanceof Error ? e.message : String(e);
           }
-          if (!detail && !pageHtml && c.url) failed++;
+          if (!detail && !pageHtml && c.url) {
+            failed++;
+            reason ||= 'на странице объявления не найден текст';
+          }
           if (st.items.includes(c)) {
             c.detail = detail;
             c.html = pageHtml;
@@ -129,7 +135,7 @@ export function refreshChanges(all: boolean, progress: (m: string) => void = () 
     }
     st.fetchedAt = now;
     await persist();
-    return { onSite: list.length, added, skipped, failed };
+    return { onSite: list.length, added, skipped, failed, reason };
   })().finally(() => {
     inflight = null;
   });

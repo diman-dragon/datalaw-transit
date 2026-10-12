@@ -152,8 +152,8 @@ export function changesView(host: HTMLElement): () => void {
       const r = await refreshChanges(all, (m) => (status.textContent = m));
       const parts = [`скачано ${r.added}`];
       if (r.skipped) parts.push(`пропущено ${r.skipped} ${plural(r.skipped, 'уже скачанное', 'уже скачанных', 'уже скачанных')}`);
-      if (r.failed) parts.push(`тексты не скачались: ${r.failed}`);
-      toast(`Объявления: ${parts.join(', ')}`, r.failed ? 'info' : 'ok');
+      if (r.failed) parts.push(`тексты не скачались: ${r.failed}${r.reason ? ` (${r.reason})` : ''}`);
+      toast(`Объявления: ${parts.join(', ')}`, r.failed ? 'info' : 'ok', r.failed ? 9000 : undefined);
     } catch (e) {
       toast(e instanceof Error ? e.message : String(e), 'err');
     } finally {
