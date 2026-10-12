@@ -8,7 +8,7 @@ let toastEl: HTMLElement | null = null;
 let toastTimer = 0;
 
 /** Короткое уведомление над нижней панелью. Ошибки висят дольше. */
-export function toast(message: string, kind: ToastKind = 'info', ms?: number): void {
+export function toast(message: string, kind: ToastKind = 'info', ms?: number, action?: { label: string; onClick: () => void }): void {
   toastEl?.remove();
   window.clearTimeout(toastTimer);
   const t = el(
@@ -16,6 +16,13 @@ export function toast(message: string, kind: ToastKind = 'info', ms?: number): v
     { class: `toast ${kind}`, role: kind === 'err' ? 'alert' : 'status', 'aria-live': kind === 'err' ? 'assertive' : 'polite' },
     icon(kind === 'ok' ? 'check' : kind === 'err' ? 'alert' : 'clock'),
     el('span', null, message),
+    action
+      ? el('button', { class: 'toast-action', onclick: (e: Event) => {
+          e.stopPropagation();
+          t.remove();
+          action.onClick();
+        } }, action.label)
+      : null,
   );
   t.addEventListener('click', () => t.remove());
   document.body.appendChild(t);

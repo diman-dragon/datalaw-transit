@@ -96,6 +96,18 @@ export function routeView(host: HTMLElement, loc: Loc): () => void {
   const sched = el('div', { class: 'scroll sched' });
   host.append(sched);
 
+  /** Прокручивает расписание так, чтобы строка часа оказалась точно по центру видимой области. */
+  const centerRow = (row: HTMLElement) => {
+    const view = sched.clientHeight;
+    const pad = Math.max(0, Math.round((view - row.offsetHeight) / 2));
+    // запас сверху и снизу, чтобы центрировать можно было и первый, и последний час
+    const grid = row.parentElement as HTMLElement;
+    grid.style.paddingTop = `${pad}px`;
+    grid.style.paddingBottom = `${pad}px`;
+    const top = row.getBoundingClientRect().top - sched.getBoundingClientRect().top + sched.scrollTop;
+    sched.scrollTop = Math.max(0, Math.round(top + row.offsetHeight / 2 - view / 2));
+  };
+
   const drawSched = (focus: boolean) => {
     const keep = sched.scrollTop;
     clear(sched);
@@ -137,17 +149,28 @@ export function routeView(host: HTMLElement, loc: Loc): () => void {
     }
     sched.append(grid);
     if (focus) {
-      // фокус на времени по часам: ближайший рейс виден сразу, чуть выше — предыдущий час
+      // фокус по центру: час ближайшего рейса — ровно посередине окна, сверху и снизу — соседние часы
       requestAnimationFrame(() => {
         const target = isToday ? (focusRow ?? (nextIdx === -1 ? lastRow : null)) : null;
         if (!target) {
           sched.scrollTop = 0;
           return;
         }
-        const anchor = (target.previousElementSibling as HTMLElement | null) ?? target;
-        sched.scrollTop = Math.max(0, anchor.offsetTop - sched.offsetTop - 4);
+        target.classList.add('focus');
+        centerRow(target);
       });
-    } else sched.scrollTop = keep;
+    } else {
+      const target = isToday ? (focusRow ?? (nextIdx === -1 ? lastRow : null)) : null;
+      if (target) {
+        target.classList.add('focus');
+        const view = sched.clientHeight;
+        const pad = Math.max(0, Math.round((view - target.offsetHeight) / 2));
+        const g = target.parentElement as HTMLElement;
+        g.style.paddingTop = `${pad}px`;
+        g.style.paddingBottom = `${pad}px`;
+      }
+      sched.scrollTop = keep;
+    }
   };
 
   drawDir();
