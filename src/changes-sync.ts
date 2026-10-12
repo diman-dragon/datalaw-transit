@@ -1,5 +1,6 @@
 import { kvGet, kvPut } from './db.ts';
-import { CHANGES_URL, parseChangeDetail, parseChangesList } from './changes.ts';
+import { CHANGES_URL, extractDetailHtml, parseChangeDetail, parseChangesList } from './changes.ts';
+import { sanitizeHtml } from './sanitize.ts';
 import type { Change, ChangesStore, JournalEntry } from './changes.ts';
 import { getText, isWifi, WIFI_ONLY_MESSAGE } from './net.ts';
 import { prefs } from './prefs.ts';
@@ -84,7 +85,7 @@ export function refreshChanges(all: boolean, progress: (m: string) => void = () 
     const fresh = list.filter((c) => !logged.has(c.id));
     const skipped = list.length - fresh.length;
     // без текста (прошлый раз не скачался) — докачиваем, это не повтор
-    const retry = st.items.filter((c) => !c.detail && c.url);
+    const retry = st.items.filter((c) => !c.html && c.url);
     const todo = [...fresh, ...retry].slice(0, MAX_DOWNLOAD);
     if (!st.items.length && !prefs.changesViewed) prefs.setChangesViewed(now);
 
@@ -100,17 +101,23 @@ export function refreshChanges(all: boolean, progress: (m: string) => void = () 
       await Promise.all(
         batch.map(async (c) => {
           let detail = '';
+          let pageHtml = '';
           try {
-            detail = c.url ? parseChangeDetail(await getText(c.url)) : '';
+            if (c.url) {
+              const raw = await getText(c.url);
+              detail = parseChangeDetail(raw);
+              pageHtml = sanitizeHtml(extractDetailHtml(raw));
+            }
           } catch {
             /* повторим при следующем обновлении */
           }
-          if (!detail && c.url) failed++;
+          if (!detail && !pageHtml && c.url) failed++;
           if (st.items.includes(c)) {
             c.detail = detail;
+            c.html = pageHtml;
             return;
           }
-          const item: Change = { ...c, detail, firstSeen: now };
+          const item: Change = { ...c, detail, html: pageHtml, firstSeen: now };
           st.items.push(item);
           const e: JournalEntry = { id: c.id, title: c.title, at: now, deleted: false };
           st.journal.push(e);

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { changeStatus, mergeChanges, parseChangeDetail, parseChangesList } from '../src/changes.ts';
+import { changeStatus, extractDetailHtml, mergeChanges, parseChangeDetail, parseChangesList } from '../src/changes.ts';
 
 const row = (lines: string[], title: string, type: string, period: string, id: string, extra = '') =>
   `<tr><td>${lines.map((l) => `<a href="https://bgprevoz.rs/linije/red-voznje/smer-a/${l}">${l}</a>`).join('&nbsp; ')}${extra}</td><td>${title}</td><td>${type}</td><td>${period}</td><td><a href="https://bgprevoz.rs/linije/aktuelne-izmene/${id}">Опширније</a></td></tr>`;
@@ -50,4 +50,12 @@ test('статус по датам', () => {
   assert.equal(changeStatus(c, 20261012), 'active');
   assert.equal(changeStatus(c, 20260901), 'soon');
   assert.equal(changeStatus(c, 20261214), 'ended');
+});
+
+test('HTML объявления: от периода до «Зона радова», с разметкой', () => {
+  const page = '<nav>меню</nav><h1>Наслов</h1><div>30/09/2026 - 13/12/2026</div><p>Током <b>радова</b>: - возила А ; - возила Б</p><ul><li>15</li></ul><h2>Зона радова</h2><div>карта</div>';
+  const h = extractDetailHtml(page);
+  assert.ok(h.includes('<b>радова</b>') && h.includes('<ul>'));
+  assert.ok(!h.includes('Зона радова') && !h.includes('меню'));
+  assert.equal(extractDetailHtml('<p>без периода</p>'), '');
 });

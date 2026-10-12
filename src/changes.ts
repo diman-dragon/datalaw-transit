@@ -17,8 +17,10 @@ export interface Change {
   from: number;
   to: number;
   url: string;
-  /** полный текст со страницы «Опширније»; пусто, если не скачан */
+  /** полный текст со страницы «Опширније» (запасной вариант); пусто, если не скачан */
   detail: string;
+  /** оформленный (очищенный) HTML объявления; пусто — не скачан или старая запись */
+  html?: string;
   /** когда впервые увидели (ISO) */
   firstSeen: string;
 }
@@ -136,6 +138,27 @@ export function parseChangeDetail(html: string): string {
     .map(oneLine)
     .filter(Boolean);
   return lines.join('\n').slice(0, 6000);
+}
+
+/**
+ * HTML тела объявления: от периода действия до блока «Зона радова» / выбора линии (сырой фрагмент — очищает sanitizeHtml).
+ * Пусто, если периода на странице нет.
+ */
+export function extractDetailHtml(html: string): string {
+  const body = html.replace(/<(script|style)[\s\S]*?<\/\1>/gi, '').replace(/<!--[\s\S]*?-->/g, '');
+  const p = PERIOD.exec(body);
+  if (!p) return '';
+  let rest = body.slice(p.index + p[0].length);
+  const stops = ['Зона радова', 'Изабери линију', 'Секретаријат за јавни превоз', 'Линкови', '<footer'];
+  let cut = rest.length;
+  for (const m of stops) {
+    const i = rest.indexOf(m);
+    if (i >= 0 && i < cut) cut = i;
+  }
+  rest = rest.slice(0, cut);
+  // маркированные пункты, записанные в строку «…: - возила… ; - возила…»
+  rest = rest.replace(/([:;.])[ \t]+- /g, '$1<br>- ');
+  return rest;
 }
 
 /** Сливает свежий список с сохранённым: сохраняет «впервые увидели» и уже скачанные тексты. */

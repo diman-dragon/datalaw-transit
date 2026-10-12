@@ -1333,3 +1333,41 @@ button.badge {
   border-radius: 12px;
   font: inherit;
 }
+.detail-html {
+  font-size: 14.5px;
+  line-height: 1.5;
+  max-height: 55vh;
+  overflow: auto;
+  overflow-wrap: anywhere;
+}
+.detail-html p {
+  margin: 0 0 10px;
+}
+.detail-html h4 {
+  margin: 14px 0 6px;
+  font-size: 15px;
+}
+.detail-html ul,
+.detail-html ol {
+  margin: 0 0 10px;
+  padding-left: 20px;
+}
+.detail-html li {
+  margin: 3px 0;
+}
+.detail-html a {
+  color: var(--accent);
+}
+.detail-html table {
+  width: 100%;
+  margin: 0 0 10px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.detail-html td,
+.detail-html th {
+  padding: 5px 6px;
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}

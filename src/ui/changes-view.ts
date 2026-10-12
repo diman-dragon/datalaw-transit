@@ -30,6 +30,13 @@ function removeWithUndo(c: Change): void {
   );
 }
 
+/** Показывает сохранённый (уже очищенный при скачивании) HTML объявления. */
+function htmlBlock(html: string): HTMLElement {
+  const d = el('div', { class: 'detail-html' });
+  d.innerHTML = html;
+  return d;
+}
+
 function showDetail(c: Change): void {
   const h = modal({
     title: c.type || 'Объявление',
@@ -37,7 +44,7 @@ function showDetail(c: Change): void {
       el('div', { class: 'muted small' }, `${fmtDateInt(c.from)} – ${fmtDateInt(c.to)}`),
       el('div', { class: 'detail-title' }, c.title),
       el('div', { class: 'chg-lines' }, ...c.lines.map((x) => el('span', { class: 'badge sm cat-none' }, x))),
-      c.detail ? el('div', { class: 'detail-text' }, c.detail) : el('p', { class: 'muted small' }, 'Текст не скачан — он докачается при следующем обновлении по Wi-Fi.'),
+      c.html ? htmlBlock(c.html) : c.detail ? el('div', { class: 'detail-text' }, c.detail) : el('p', { class: 'muted small' }, 'Текст не скачан — он докачается при следующем обновлении по Wi-Fi.'),
       c.url ? el('a', { class: 'btn plain wide', href: c.url, target: '_blank', rel: 'noopener' }, 'Открыть на сайте') : null,
     ],
     actions: [
