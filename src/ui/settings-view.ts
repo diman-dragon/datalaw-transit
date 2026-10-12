@@ -1,36 +1,20 @@
-import { datasetStats, makeDataset } from '../dataset.ts';
+import { datasetStats } from '../dataset.ts';
 import { saveDataset } from '../db.ts';
-import { fmtDateInt, fmtSize, monthKey, plural, validityFull } from '../format.ts';
+import { FEEDS } from '../feeds.ts';
+import { fmtDateInt, monthKey, plural, validityFull } from '../format.ts';
+import { fetchSchedule } from '../importer.ts';
 import { prefs } from '../prefs.ts';
 import type { ThemeName } from '../prefs.ts';
 import { data, hasData, setDataset } from '../store.ts';
 import { CAT_LABEL } from '../types.ts';
-import { checkSchedule, FILE_FORMAT, MAX_FILE_BYTES } from '../validate.ts';
-import type { ScheduleCheck } from '../validate.ts';
+import type { Dataset } from '../types.ts';
+import { dateToInt } from '../format.ts';
 import { titleBar } from './common.ts';
 import { append, clear, el, icon } from './dom.ts';
 import { confirmDialog, toast } from './overlay.ts';
 import { applyTheme, THEMES } from './theme.ts';
 
 const dtFmt = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-
-const EXAMPLE = `{
-  "format": "${FILE_FORMAT}",
-  "validTo": "2026-12-31",
-  "lines": [{
-    "id": "26", "short": "26",
-    "long": "Дорћол - Браће Јерковић",
-    "kind": "bus", "category": "day",
-    "dirs": [{
-      "from": "ДОРЋОЛ", "to": "БРАЋЕ ЈЕРКОВИЋ",
-      "validFrom": "2025-03-17",
-      "times": {
-        "weekday": ["04:10", "04:30", "24:15"],
-        "sat": ["05:00"], "sun": ["06:00"]
-      }
-    }]
-  }]
-}`;
 
 function countText(n: number, one: string, few: string, many: string): string {
   return `${n.toLocaleString('ru-RU')} ${plural(n, one, few, many)}`;
@@ -40,16 +24,23 @@ function statsText(s: { lines: number; dirs: number; departures: number }): stri
   return `${countText(s.lines, 'линия', 'линии', 'линий')} · ${countText(s.dirs, 'направление', 'направления', 'направлений')} · ${countText(s.departures, 'отправление', 'отправления', 'отправлений')}`;
 }
 
-export function settingsView(host: HTMLElement): () => void {
-  host.append(titleBar('Настройки'));
-  const scroll = el('div', { class: 'scroll settings' });
-  host.append(scroll);
+function host(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
 
-  // ================= Расписание: загрузка файла
+export function settingsView(host_: HTMLElement): () => void {
+  host_.append(titleBar('Настройки'));
+  const scroll = el('div', { class: 'scroll settings' });
+  host_.append(scroll);
+
+  // ================= Расписание: загрузка с data.gov.rs
   const status = el('div', { class: 'data-status' });
   const result = el('div', { class: 'result', 'aria-live': 'polite' });
-  const input = el('input', { type: 'file', class: 'hidden', accept: '.json,application/json,text/plain' });
-  const uploadBtn = el('button', { class: 'btn primary wide' }, icon('upload'), 'Загрузить расписание');
+  const loadBtn = el('button', { class: 'btn primary wide' }, icon('download'), 'Загрузить расписание');
   let busy = false;
 
   const showResult = (kind: 'info' | 'ok' | 'err', title: string, lines: string[] = []) => {
@@ -61,7 +52,7 @@ export function settingsView(host: HTMLElement): () => void {
   const drawStatus = () => {
     clear(status);
     if (!hasData()) {
-      status.append(el('b', null, 'Расписание не загружено'), el('div', { class: 'muted' }, 'Выберите файл расписания (формат описан ниже).'));
+      append(status, [el('b', null, 'Расписание не загружено'), el('div', { class: 'muted' }, 'Нажмите кнопку ниже — приложение скачает расписание с портала открытых данных Сербии.')]);
       return;
     }
     const ds = data();
@@ -69,75 +60,60 @@ export function settingsView(host: HTMLElement): () => void {
     const v = validityFull(s.validFrom, ds.validTo);
     append(status, [
       el('b', null, 'Расписание загружено'),
-      el('div', { class: 'muted' }, `Файл: ${ds.fileName || '—'}`),
+      el('div', { class: 'muted' }, `Источник: ${ds.source || ds.fileName || '—'}`),
       el('div', { class: 'muted' }, `Загружено: ${dtFmt.format(new Date(ds.builtAt))}`),
       el('div', { class: 'muted' }, statsText(s)),
       v ? el('div', { class: 'muted' }, v) : null,
     ]);
   };
 
-  const setBusy = (b: boolean) => {
-    busy = b;
-    uploadBtn.disabled = b;
-  };
-
-  const summaryNodes = (c: ScheduleCheck): (Node | string)[] => {
+  const summaryNodes = (ds: Dataset): (Node | string)[] => {
+    const s = datasetStats(ds);
     const cats = new Map<string, number>();
-    for (const l of c.lines) cats.set(CAT_LABEL[l.cat], (cats.get(CAT_LABEL[l.cat]) ?? 0) + 1);
-    const v = validityFull(c.validFrom, c.validTo);
+    for (const l of ds.lines) cats.set(CAT_LABEL[l.cat], (cats.get(CAT_LABEL[l.cat]) ?? 0) + 1);
+    const v = validityFull(s.validFrom, ds.validTo);
     const nodes: (Node | string)[] = [
-      el('div', { class: 'sum-line' }, statsText(c.stats)),
+      el('div', { class: 'sum-line' }, statsText(s)),
       el('div', { class: 'muted small' }, [...cats].map(([k, n]) => `${k}: ${n}`).join(' · ')),
     ];
     if (v) nodes.push(el('div', { class: 'muted small' }, v));
-    if (c.generated) nodes.push(el('div', { class: 'muted small' }, `Файл создан: ${fmtDateInt(+c.generated.slice(0, 10).replace(/-/g, ''))}`));
     return nodes;
   };
 
-  const warningNodes = (warnings: string[], max: number): Node[] => {
-    if (!warnings.length) return [];
-    const shown = warnings.slice(0, max);
-    return [
-      el(
-        'div',
-        { class: 'warn-box' },
-        el('b', null, `Замечания: ${warnings.length}`),
-        el('ul', null, ...shown.map((w) => el('li', null, w)), warnings.length > max ? el('li', { class: 'muted' }, `…и ещё ${warnings.length - max}`) : null),
-      ),
-    ];
+  const warningsFor = (ds: Dataset): string[] => {
+    const w: string[] = [];
+    const today = dateToInt(new Date());
+    if (ds.validTo && ds.validTo < today) w.push(`Срок действия этого расписания истёк ${fmtDateInt(ds.validTo)}: на портале пока нет более свежего.`);
+    const s = datasetStats(ds);
+    if (s.validFrom && s.validFrom > today) w.push(`Расписание начнёт действовать только с ${fmtDateInt(s.validFrom)}.`);
+    if (hasData()) {
+      const cur = data();
+      if (ds.validTo && cur.validTo && ds.validTo < cur.validTo) w.push(`Новое расписание заканчивается раньше текущего (${fmtDateInt(ds.validTo)} против ${fmtDateInt(cur.validTo)}).`);
+      if (ds.lines.length < cur.lines.length * 0.7) w.push(`В новом расписании заметно меньше линий: ${ds.lines.length} против ${cur.lines.length}.`);
+      const have = new Set(ds.lines.map((l) => l.id));
+      const lost = prefs.favs().filter((f) => !have.has(f));
+      if (lost.length) w.push(`Из избранного в новом расписании нет: ${lost.map((x) => x.replace(/^[a-z]:/, '')).join(', ')}.`);
+    }
+    return w;
   };
 
-  const handleFile = async (file: File) => {
-    setBusy(true);
-    showResult('info', 'Проверяю файл…', [file.name]);
+  const load = async () => {
+    if (busy) return;
+    busy = true;
+    loadBtn.disabled = true;
+    showResult('info', 'Загрузка…', ['Это может занять до минуты.']);
     try {
-      if (file.size > MAX_FILE_BYTES) {
-        const msg = `Файл слишком большой (${fmtSize(file.size)}). Максимум — ${fmtSize(MAX_FILE_BYTES)}.`;
-        showResult('err', 'Файл не принят', [msg]);
-        toast(msg, 'err');
-        return;
-      }
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const check = checkSchedule(bytes, file.name);
-      if (!check.ok) {
-        showResult('err', 'Файл не принят', check.errors);
-        toast(check.errors[0], 'err');
-        return;
-      }
-      const extra: string[] = [];
-      if (hasData()) {
-        const cur = data();
-        if (cur.generated && check.generated && check.generated < cur.generated) extra.push(`Этот файл старее загруженного: создан ${fmtDateInt(+check.generated.slice(0, 10).replace(/-/g, ''))}, а сейчас в приложении файл от ${fmtDateInt(+cur.generated.slice(0, 10).replace(/-/g, ''))}.`);
-        const have = new Set(check.lines.map((l) => l.id));
-        const lost = prefs.favs().filter((f) => !have.has(f));
-        if (lost.length) extra.push(`Из избранного в новом файле нет: ${lost.map((x) => x.replace(/^g:/, '')).join(', ')}.`);
-      }
-      const warnings = [...extra, ...check.warnings];
-      showResult('info', 'Файл проверен', [`${statsText(check.stats)}${warnings.length ? ` · замечаний: ${warnings.length}` : ''}`]);
+      const ds = await fetchSchedule((m) => showResult('info', 'Загрузка…', [m]));
+      const warnings = warningsFor(ds);
+      showResult('info', 'Расписание получено', [statsText(datasetStats(ds)), 'Подтвердите замену в окне.']);
       const yes = await confirmDialog({
-        title: hasData() ? 'Заменить расписание?' : 'Загрузить расписание?',
-        body: [...summaryNodes(check), ...warningNodes(warnings, 6), hasData() ? el('p', { class: 'muted small' }, 'Прежнее расписание будет заменено. Избранное сохранится.') : ''],
-        ok: hasData() ? 'Заменить' : 'Загрузить',
+        title: hasData() ? 'Заменить расписание?' : 'Сохранить расписание?',
+        body: [
+          ...summaryNodes(ds),
+          warnings.length ? el('div', { class: 'warn-box' }, el('b', null, `Замечания: ${warnings.length}`), el('ul', null, ...warnings.map((w) => el('li', null, w)))) : null,
+          hasData() ? el('p', { class: 'muted small' }, 'Прежнее расписание будет заменено. Избранное сохранится.') : null,
+        ],
+        ok: hasData() ? 'Заменить' : 'Сохранить',
       });
       if (!yes) {
         showResult('info', 'Загрузка отменена', ['Прежнее расписание не тронуто.']);
@@ -145,53 +121,36 @@ export function settingsView(host: HTMLElement): () => void {
         return;
       }
       showResult('info', 'Сохраняю в память телефона…');
-      const ds = makeDataset(check, file.name);
       await saveDataset(ds);
       setDataset(ds);
       prefs.setRemindMonth(monthKey(new Date()));
-      showResult('ok', 'Расписание загружено', [statsText(check.stats), ...(warnings.length ? [`Замечаний: ${warnings.length} (часть данных пропущена)`] : [])]);
-      toast(`Расписание загружено: ${countText(check.stats.lines, 'линия', 'линии', 'линий')}`, 'ok');
+      showResult('ok', 'Расписание загружено', [statsText(datasetStats(ds)), ...(warnings.length ? [`Замечаний: ${warnings.length}`] : [])]);
+      toast(`Расписание загружено: ${countText(ds.lines.length, 'линия', 'линии', 'линий')}`, 'ok');
       drawStatus();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      showResult('err', 'Не удалось загрузить', [msg]);
-      toast(`Ошибка: ${msg}`, 'err');
+      showResult('err', 'Не удалось загрузить', [msg, 'Прежнее расписание не тронуто.']);
+      toast(msg, 'err');
     } finally {
-      setBusy(false);
-      input.value = '';
+      busy = false;
+      loadBtn.disabled = false;
     }
   };
+  loadBtn.addEventListener('click', () => void load());
 
-  uploadBtn.addEventListener('click', () => {
-    if (busy) return;
-    input.value = '';
-    input.click();
-  });
-  input.addEventListener('change', () => {
-    const f = input.files?.[0];
-    if (!f) return;
-    void handleFile(f);
-  });
-
-  const formatCard = el(
+  const sourcesCard = el(
     'div',
     { class: 'card pad format' },
-    el('h4', null, 'Формат файла'),
+    el('h4', null, 'Откуда берутся данные'),
     el(
       'ul',
       { class: 'fmt-list' },
-      el('li', null, el('b', null, 'Тип: '), 'JSON, расширение ', el('code', null, '.json'), ', кодировка UTF-8'),
-      el('li', null, el('b', null, 'Метка: '), el('code', null, `"format": "${FILE_FORMAT}"`)),
-      el('li', null, el('b', null, 'Содержимое: '), 'линии → направления → время отправления «ЧЧ:ММ» для будней, субботы и воскресенья'),
-      el('li', null, el('b', null, 'Размер: '), `до ${fmtSize(MAX_FILE_BYTES)}`),
-      el('li', null, el('b', null, 'Как получить: '), 'скрипт ', el('code', null, 'tools/collect_gsp.py'), ' (см. README)'),
+      ...FEEDS.map((f) => el('li', null, el('b', null, `${f.name}: `), host(f.url))),
+      el('li', null, el('b', null, 'Формат: '), 'открытый GTFS (zip), скачивается автоматически'),
     ),
-    el('details', null, el('summary', null, 'Пример структуры'), el('pre', null, EXAMPLE)),
   );
 
-  scroll.append(
-    el('section', { class: 'section' }, el('h3', null, 'Расписание'), el('div', { class: 'card pad' }, status, uploadBtn, result, input), formatCard),
-  );
+  scroll.append(el('section', { class: 'section' }, el('h3', null, 'Расписание'), el('div', { class: 'card pad' }, status, loadBtn, result), sourcesCard));
   drawStatus();
 
   // ================= Тема

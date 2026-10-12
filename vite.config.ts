@@ -9,6 +9,7 @@ export default defineConfig({
     __APP_VERSION__: JSON.stringify(pkg.version),
     __BUILD_DATE__: JSON.stringify(new Date().toISOString().slice(0, 10)),
   },
+  worker: { format: 'es' },
   build: {
     outDir: 'dist',
     target: 'es2022',

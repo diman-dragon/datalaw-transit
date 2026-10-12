@@ -39,6 +39,7 @@ const ICONS = {
   swapV: '<path d="M8 20V4m0 0L4.5 7.5M8 4l3.5 3.5M16 4v16m0 0-3.5-3.5M16 20l3.5-3.5"/>',
   swapH: '<path d="M4 8h16m0 0-3.5-3.5M20 8l-3.5 3.5M20 16H4m0 0 3.5-3.5M4 16l3.5 3.5"/>',
   arrowRight: '<path d="M5 12h14m0 0-6-6m6 6-6 6"/>',
+  download: '<path d="M12 4v11m0 0-4-4m4 4 4-4M5 20h14"/>',
   upload: '<path d="M12 16V4m0 0L8 8m4-4 4 4M5 20h14"/>',
   check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
   alert: '<circle cx="12" cy="12" r="9"/><path d="M12 7.5V13M12 16.4v.1"/>',
