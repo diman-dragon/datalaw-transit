@@ -23,9 +23,20 @@ export interface Change {
   firstSeen: string;
 }
 
+/** Запись журнала: это объявление уже скачивали (даже если потом удалили) — при обновлении оно пропускается. */
+export interface JournalEntry {
+  id: string;
+  title: string;
+  /** когда скачано (ISO) */
+  at: string;
+  /** удалено пользователем */
+  deleted: boolean;
+}
+
 export interface ChangesStore {
   fetchedAt: string;
   items: Change[];
+  journal: JournalEntry[];
 }
 
 function decode(s: string): string {

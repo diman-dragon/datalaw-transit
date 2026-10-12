@@ -1237,3 +1237,99 @@ button.badge {
 .dialog-body .btn.wide {
   margin-top: 14px;
 }
+
+/* ---------- объявления: действия, удаление, журнал ---------- */
+.chg-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.chg-actions .btn {
+  flex: 1 1 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding-left: 12px;
+  padding-right: 12px;
+}
+.chg-actions .icon {
+  width: 18px;
+  height: 18px;
+}
+.chg {
+  display: flex;
+  flex-direction: row;
+  gap: 0;
+  align-items: stretch;
+  padding: 0;
+}
+.chg-open {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  padding: 12px;
+  color: inherit;
+}
+.chg-del {
+  flex: none;
+  width: 44px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+.chg-del:active {
+  color: var(--accent);
+}
+.chg-del .icon {
+  width: 18px;
+  height: 18px;
+}
+.journal {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 50vh;
+  overflow: auto;
+}
+.journal li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+.journal li:first-child {
+  border-top: 0;
+}
+.journal small {
+  color: var(--muted);
+}
+.btn.wide + .btn.wide {
+  margin-top: 8px;
+}
+.hidden-input {
+  display: none;
+}
+.feed-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+}
+.feed-file {
+  font-size: 13px;
+  word-break: break-all;
+}
+.feed-select {
+  width: 100%;
+  padding: 10px 12px;
+  color: var(--text);
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font: inherit;
+}

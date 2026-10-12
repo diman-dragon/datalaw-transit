@@ -1,6 +1,6 @@
 import { fmtMin, pretty, waitText } from '../format.ts';
 import { prefs } from '../prefs.ts';
-import { nextDeparture, routeCompare } from '../schedule.ts';
+import { nextDeparture } from '../schedule.ts';
 import { hasData, lineById } from '../store.ts';
 import type { Direction, Line } from '../types.ts';
 import { badge, button, emptyState, fitAll, fitText, titleBar } from './common.ts';
@@ -71,11 +71,12 @@ export function favView(host: HTMLElement): () => void {
   };
 
   const remove = (line: Line) => {
+    const at = prefs.favs().indexOf(line.id);
     prefs.toggleFav(line.id);
     toast(`Линия ${line.short} убрана из избранного`, 'info', 4000, {
       label: 'Отменить',
       onClick: () => {
-        if (!prefs.isFav(line.id)) prefs.toggleFav(line.id);
+        prefs.restoreFav(line.id, at);
         render();
       },
     });
@@ -94,8 +95,7 @@ export function favView(host: HTMLElement): () => void {
     const lines = prefs
       .favs()
       .map((id) => lineById(id))
-      .filter((l): l is Line => !!l)
-      .sort(routeCompare);
+      .filter((l): l is Line => !!l);
     if (!lines.length) {
       scroll.append(emptyState('Пока пусто', 'Откройте линию на вкладке «Линии» и нажмите ★ — она появится здесь.', button('К линиям', () => openTab('lines'))));
       return;

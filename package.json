@@ -1,7 +1,7 @@
 {
   "name": "datalaw-transit",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "DataLaw Transit — офлайн-расписание общественного транспорта Белграда",
   "type": "module",
   "scripts": {

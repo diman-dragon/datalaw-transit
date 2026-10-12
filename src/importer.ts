@@ -5,7 +5,7 @@ import type { WorkerMessage, WorkerRequest } from './gtfs/worker.ts';
 
 export type Progress = (msg: string) => void;
 
-function isZip(b: Uint8Array): boolean {
+export function isZip(b: Uint8Array): boolean {
   return b.length > 4 && b[0] === 0x50 && b[1] === 0x4b;
 }
 
@@ -58,6 +58,26 @@ export async function fetchSchedule(progress: Progress): Promise<Dataset> {
   }
   progress('Обработка данных…');
   return runWorker(req, progress);
+}
+
+export interface LocalFeed {
+  key: string;
+  name: string;
+  zip: Uint8Array;
+}
+
+/** Собирает расписание из архивов, выбранных пользователем (тот же GTFS-формат, что и на data.gov.rs). */
+export async function buildFromZips(feeds: LocalFeed[], progress: Progress): Promise<Dataset> {
+  progress('Обработка данных…');
+  return runWorker({ feeds, now: Date.now() }, progress);
+}
+
+/** Читает выбранный файл как zip. */
+export async function readZipFile(f: File): Promise<Uint8Array> {
+  const bytes = new Uint8Array(await f.arrayBuffer());
+  if (!bytes.length) throw new Error(`${f.name}: файл пустой`);
+  if (!isZip(bytes)) throw new Error(`${f.name}: это не zip-архив`);
+  return bytes;
 }
 
 function runWorker(req: WorkerRequest, progress: Progress): Promise<Dataset> {

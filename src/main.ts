@@ -8,7 +8,7 @@ import { fmtDateInt, monthKey, validityFull } from './format.ts';
 import { button, emptyState } from './ui/common.ts';
 import { clear, el, icon } from './ui/dom.ts';
 import type { IconName } from './ui/dom.ts';
-import { autoRefreshIfStale, initChanges, onChangesUpdated, unseenCount } from './changes-sync.ts';
+import { initChanges, onChangesUpdated, unseenCount } from './changes-sync.ts';
 import { changesView } from './ui/changes-view.ts';
 import { favView } from './ui/fav-view.ts';
 import { linesView } from './ui/lines-view.ts';
@@ -137,5 +137,4 @@ if (Capacitor.isNativePlatform()) {
   onChangesUpdated(updateBadge);
   window.addEventListener('hashchange', updateBadge);
   monthlyReminder();
-  void autoRefreshIfStale(); // изменения обновляются сами, но только по Wi-Fi
 })();

@@ -2,7 +2,7 @@ import { datasetStats } from '../dataset.ts';
 import { saveDataset } from '../db.ts';
 import { FEEDS } from '../feeds.ts';
 import { fmtDateInt, monthKey, plural, validityFull } from '../format.ts';
-import { fetchSchedule } from '../importer.ts';
+import { buildFromZips, fetchSchedule, readZipFile } from '../importer.ts';
 import { prefs } from '../prefs.ts';
 import type { ThemeName } from '../prefs.ts';
 import { data, hasData, setDataset } from '../store.ts';
@@ -97,13 +97,18 @@ export function settingsView(host_: HTMLElement): () => void {
     return w;
   };
 
-  const load = async () => {
+  const fileInput = el('input', { type: 'file', accept: '.zip,application/zip,application/x-zip-compressed', multiple: true, class: 'hidden-input' });
+  const fileBtn = el('button', { class: 'btn plain wide' }, icon('upload'), 'Загрузить из архива (zip)');
+
+  /** Общая часть: получить набор данных → показать сводку → после подтверждения сохранить. */
+  const load = async (produce: () => Promise<Dataset>) => {
     if (busy) return;
     busy = true;
     loadBtn.disabled = true;
+    fileBtn.disabled = true;
     showResult('info', 'Загрузка…', ['Это может занять до минуты.']);
     try {
-      const ds = await fetchSchedule((m) => showResult('info', 'Загрузка…', [m]));
+      const ds = await produce();
       const warnings = warningsFor(ds);
       showResult('info', 'Расписание получено', [statsText(datasetStats(ds)), 'Подтвердите замену в окне.']);
       const yes = await confirmDialog({
@@ -134,9 +139,56 @@ export function settingsView(host_: HTMLElement): () => void {
     } finally {
       busy = false;
       loadBtn.disabled = false;
+      fileBtn.disabled = false;
     }
   };
-  loadBtn.addEventListener('click', () => void load());
+  loadBtn.addEventListener('click', () => void load(() => fetchSchedule((m) => showResult('info', 'Загрузка…', [m]))));
+
+  // ---- архив с телефона: тот же GTFS-формат, что отдаёт data.gov.rs (можно выбрать сразу два: город и пригород)
+  const guessKey = (name: string) => (/prigrad|suburb|podgrad|пригор/i.test(name) ? 'p' : 'c');
+  fileBtn.addEventListener('click', () => {
+    fileInput.value = '';
+    fileInput.click();
+  });
+  fileInput.addEventListener('change', () => {
+    const files = Array.from(fileInput.files ?? []);
+    if (!files.length || busy) return;
+    const picks = files.map((f) => ({ f, sel: el('select', { class: 'feed-select' }, ...FEEDS.map((x) => el('option', { value: x.key }, x.name))) }));
+    picks.forEach((p, i) => {
+      let k = guessKey(p.f.name);
+      // два файла без подсказки в имени: первый — город, второй — пригород
+      if (picks.length > 1 && i > 0 && k === 'c' && !/prigrad|suburb|podgrad|пригор/i.test(p.f.name) && !/prigrad|suburb|podgrad|пригор/i.test(picks[0].f.name)) k = 'p';
+      p.sel.value = k;
+    });
+    void (async () => {
+      const yes = await confirmDialog({
+        title: 'Что за архивы?',
+        body: [
+          el('p', { class: 'muted small' }, 'Нужен GTFS-архив в том же формате, что на data.gov.rs. Выберите тип для каждого файла: от него зависят категории и номера избранных линий.'),
+          ...picks.map((p) => el('div', { class: 'feed-pick' }, el('div', { class: 'feed-file' }, p.f.name), p.sel)),
+        ],
+        ok: 'Продолжить',
+      });
+      if (!yes) return;
+      const used = new Set<string>();
+      for (const p of picks) {
+        if (used.has(p.sel.value)) {
+          toast('Для двух файлов выбран один и тот же тип', 'err');
+          return;
+        }
+        used.add(p.sel.value);
+      }
+      void load(async () => {
+        const feeds = [];
+        for (const p of picks) {
+          const cfg = FEEDS.find((x) => x.key === p.sel.value)!;
+          showResult('info', 'Загрузка…', [`Читаю ${p.f.name}…`]);
+          feeds.push({ key: cfg.key, name: cfg.name, zip: await readZipFile(p.f) });
+        }
+        return buildFromZips(feeds, (m) => showResult('info', 'Загрузка…', [m]));
+      });
+    })();
+  });
 
   const sourcesCard = el(
     'div',
@@ -146,11 +198,11 @@ export function settingsView(host_: HTMLElement): () => void {
       'ul',
       { class: 'fmt-list' },
       ...FEEDS.map((f) => el('li', null, el('b', null, `${f.name}: `), host(f.url))),
-      el('li', null, el('b', null, 'Формат: '), 'открытый GTFS (zip), скачивается автоматически'),
+      el('li', null, el('b', null, 'Формат: '), 'открытый GTFS (zip): скачивается или выбирается из архива на телефоне'),
     ),
   );
 
-  scroll.append(el('section', { class: 'section' }, el('h3', null, 'Расписание'), el('div', { class: 'card pad' }, status, loadBtn, result), sourcesCard));
+  scroll.append(el('section', { class: 'section' }, el('h3', null, 'Расписание'), el('div', { class: 'card pad' }, status, loadBtn, fileBtn, fileInput, result), sourcesCard));
   drawStatus();
 
   // ================= Тема
