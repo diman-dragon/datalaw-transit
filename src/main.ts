@@ -1,60 +1,79 @@
 import './styles.css';
+import { Capacitor } from '@capacitor/core';
 import { prefs } from './prefs.ts';
-import { initStore } from './store.ts';
+import { shouldRemind } from './remind.ts';
+import { data, hasData, initStore } from './store.ts';
+import { datasetStats } from './dataset.ts';
+import { fmtDateInt, monthKey, validityFull } from './format.ts';
+import { button, emptyState } from './ui/common.ts';
 import { clear, el, icon } from './ui/dom.ts';
+import type { IconName } from './ui/dom.ts';
 import { favView } from './ui/fav-view.ts';
-import { parseHash } from './ui/router.ts';
-import type { Route } from './ui/router.ts';
+import { linesView } from './ui/lines-view.ts';
+import { handleBack, openTab, parseHash, resetToFav } from './ui/nav.ts';
+import type { Loc, TabId } from './ui/nav.ts';
+import { modal } from './ui/overlay.ts';
 import { routeView } from './ui/route-view.ts';
-import { searchView } from './ui/search-view.ts';
 import { settingsView } from './ui/settings-view.ts';
-import { stopView } from './ui/stop-view.ts';
 import { applyTheme } from './ui/theme.ts';
 
 type Cleanup = () => void;
-type ViewFn = (host: HTMLElement, r: Route) => Cleanup | void | Promise<Cleanup | void>;
+type ViewFn = (host: HTMLElement, loc: Loc) => Cleanup | void;
 
 applyTheme(prefs.theme);
 
+const TABS: { id: TabId; label: string; icon: IconName }[] = [
+  { id: 'fav', label: 'Избранное', icon: 'star' },
+  { id: 'lines', label: 'Линии', icon: 'bus' },
+  { id: 'settings', label: 'Настройки', icon: 'sliders' },
+];
+
+const VIEWS: Record<string, { tab: TabId | null; fn: ViewFn }> = {
+  fav: { tab: 'fav', fn: favView },
+  lines: { tab: 'lines', fn: linesView },
+  settings: { tab: 'settings', fn: settingsView },
+  route: { tab: null, fn: routeView },
+};
+
 const app = document.getElementById('app')!;
 const view = el('main', { class: 'view', id: 'view' });
-const tabs: { id: string; label: string; href: string; icon: 'search' | 'star' | 'gear' }[] = [
-  { id: 'search', label: 'Поиск', href: '#/', icon: 'search' },
-  { id: 'fav', label: 'Избранное', href: '#/fav', icon: 'star' },
-  { id: 'settings', label: 'Настройки', href: '#/settings', icon: 'gear' },
-];
-const nav = el(
-  'nav',
-  { class: 'tabbar', 'aria-label': 'Разделы' },
-  ...tabs.map((t) => el('a', { class: 'tab', href: t.href, 'data-tab': t.id }, icon(t.icon), el('span', null, t.label))),
-);
+const tabButtons = TABS.map((t) => {
+  const b = el('button', { class: 'tab', 'data-tab': t.id, 'aria-label': t.label }, el('span', { class: 'tab-ico' }, icon(t.icon)), el('span', { class: 'tab-label' }, t.label));
+  b.addEventListener('click', () => openTab(t.id));
+  return b;
+});
+const nav = el('nav', { class: 'tabbar', 'aria-label': 'Разделы' }, ...tabButtons);
 app.append(view, nav);
-
-const views: Record<string, { tab: string; fn: ViewFn }> = {
-  '': { tab: 'search', fn: searchView },
-  fav: { tab: 'fav', fn: favView },
-  settings: { tab: 'settings', fn: settingsView },
-  stop: { tab: 'search', fn: stopView },
-  route: { tab: 'search', fn: routeView },
-};
 
 let cleanup: Cleanup | null = null;
 let token = 0;
+/** вкладка, с которой открыта линия — её и подсвечиваем на экране линии */
+let lastTab: TabId = 'fav';
 
-async function render(): Promise<void> {
+function render(): void {
   const my = ++token;
   cleanup?.();
   cleanup = null;
-  const r = parseHash();
-  const def = views[r.path[0] ?? ''] ?? views[''];
-  nav.querySelectorAll('.tab').forEach((a) => a.classList.toggle('active', a.getAttribute('data-tab') === def.tab));
+  const loc = parseHash();
+  const def = VIEWS[loc.path[0] ?? ''];
+  if (!def) {
+    openTab('fav');
+    return;
+  }
+  if (def.tab) lastTab = def.tab;
+  tabButtons.forEach((b) => {
+    const on = b.getAttribute('data-tab') === lastTab;
+    b.classList.toggle('active', on);
+    if (on) b.setAttribute('aria-current', 'page');
+    else b.removeAttribute('aria-current');
+  });
   const host = el('div', { class: 'page' });
   let c: Cleanup | void = undefined;
   try {
-    c = await def.fn(host, r);
+    c = def.fn(host, loc);
   } catch (e) {
     clear(host);
-    host.append(el('div', { class: 'empty' }, el('h2', null, 'Что-то пошло не так'), el('p', null, e instanceof Error ? e.message : String(e))));
+    host.append(emptyState('Что-то пошло не так', e instanceof Error ? e.message : String(e), button('В избранное', () => openTab('fav'))));
   }
   if (my !== token) {
     if (typeof c === 'function') c();
@@ -62,10 +81,36 @@ async function render(): Promise<void> {
   }
   cleanup = typeof c === 'function' ? c : null;
   view.replaceChildren(host);
-  view.scrollTop = 0;
 }
 
-window.addEventListener('hashchange', () => void render());
+/** Раз в месяц, при первом открытии: напомнить проверить актуальность расписания. */
+function monthlyReminder(): void {
+  const now = new Date();
+  if (!shouldRemind(prefs.remindMonth, now, hasData())) return;
+  prefs.setRemindMonth(monthKey(now));
+  const ds = data();
+  const s = datasetStats(ds);
+  const v = validityFull(s.validFrom, ds.validTo);
+  modal({
+    title: 'Проверьте расписание',
+    body: [
+      el('p', null, 'Новый месяц — самое время проверить, не обновилось ли расписание. Загрузите свежий файл, если он появился.'),
+      el('div', { class: 'muted small' }, `Сейчас загружено: ${fmtDateInt(+ds.builtAt.slice(0, 10).replace(/-/g, ''))}`),
+      v ? el('div', { class: 'muted small' }, v) : null,
+    ],
+    actions: [
+      { label: 'Понятно', kind: 'plain' },
+      { label: 'Открыть настройки', kind: 'primary', onClick: () => openTab('settings') },
+    ],
+  });
+}
+
+window.addEventListener('hashchange', render);
+
+// системная кнопка «назад» на Android: по шагам до «Избранного», в «Избранном» — остаёмся на месте
+if (Capacitor.isNativePlatform()) {
+  void import('@capacitor/app').then(({ App }) => App.addListener('backButton', () => handleBack())).catch(() => {});
+}
 
 (async () => {
   try {
@@ -73,5 +118,7 @@ window.addEventListener('hashchange', () => void render());
   } catch (e) {
     console.error(e);
   }
-  await render();
+  resetToFav(); // приложение всегда открывается на «Избранном»
+  render();
+  monthlyReminder();
 })();

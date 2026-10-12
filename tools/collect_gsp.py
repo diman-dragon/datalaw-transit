@@ -361,7 +361,10 @@ def make_line(item: dict[str, Any], page: dict[str, Any] | None, blocks: list[di
     if not dirs:
         return None, notes + ["нет ни одного направления"]
     long_name = f"{dirs[0]['from']} - {dirs[0]['to']}"
-    return {"id": item["id"], "short": short, "long": long_name, "kind": item["kind"], "dirs": dirs}, notes
+    line: dict[str, Any] = {"id": item["id"], "short": short, "long": long_name, "kind": item["kind"], "dirs": dirs}
+    if item.get("night"):
+        line["category"] = "night"  # приложение показывает такие линии в фильтре «Ночные»
+    return line, notes
 
 
 def main() -> int:

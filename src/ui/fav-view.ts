@@ -1,90 +1,95 @@
+import { fmtMin, pretty, waitText } from '../format.ts';
 import { prefs } from '../prefs.ts';
-import { fmtTime, patternTimes, secondsNow } from '../schedule.ts';
-import { data, ensureRoutes, hasData, linesAtStop, routeData, routeIdx, stopIdx } from '../store.ts';
-import { badge, empty, lineBadges, pageHeader, starButton } from './common.ts';
+import { nextDeparture, routeCompare } from '../schedule.ts';
+import { hasData, lineById } from '../store.ts';
+import type { Direction, Line } from '../types.ts';
+import { badge, button, emptyState, fitAll, fitText, titleBar } from './common.ts';
 import { el, icon } from './dom.ts';
-import { href } from './router.ts';
-import { noDataState } from './search-view.ts';
+import { openTab, routeLink } from './nav.ts';
 
-export async function favView(root: HTMLElement): Promise<() => void> {
-  root.appendChild(pageHeader({ title: 'Избранное' }));
+interface NextInfo {
+  text: string;
+  soon: boolean;
+}
+
+function nextInfo(dir: Direction | undefined, now: Date): NextInfo {
+  if (!dir) return { text: 'нет отправлений', soon: false };
+  const n = nextDeparture(dir, now);
+  if (!n) return { text: 'нет отправлений', soon: false };
+  if (n.tomorrow) return { text: `завтра ${fmtMin(n.min)}`, soon: false };
+  return { text: `${fmtMin(n.min)} · ${waitText(n.wait)}`, soon: n.wait <= 10 };
+}
+
+interface Card {
+  node: HTMLElement;
+  update: (now: Date) => void;
+}
+
+/** Карточка линии: номер слева; справа две «строки» — конечные, между ними стрелки, под названием — ближайшее отправление. */
+function makeCard(line: Line): Card {
+  const d0 = line.dirs[0];
+  const d1 = line.dirs[1];
+  const names = [pretty(d0.from), pretty(d1 ? d1.from : d0.to)];
+  const dirsOf: (Direction | undefined)[] = [d0, d1];
+
+  const nextEls: HTMLElement[] = [];
+  const term = (i: number) => {
+    const next = el('span', { class: 'term-next' });
+    nextEls.push(next);
+    const a = routeLink(line.id, i, 'term', el('span', { class: 'term-name' }, names[i]), next);
+    a.setAttribute('aria-label', `${line.short}: от ${names[i]}`);
+    return a;
+  };
+  const rows = el('div', { class: 'fav-rows' }, term(0), el('span', { class: 'term-swap', 'aria-hidden': 'true' }, icon('swapV')), term(1));
+  const num = routeLink(line.id, 0, 'fav-num', badge(line, 'fill'));
+  num.setAttribute('aria-label', `Линия ${line.short}`);
+  const node = el('article', { class: 'fav-card' }, num, rows);
+
+  const update = (now: Date) => {
+    dirsOf.forEach((d, i) => {
+      const info = nextInfo(d, now);
+      nextEls[i].textContent = info.text;
+      nextEls[i].classList.toggle('soon', info.soon);
+    });
+  };
+  return { node, update };
+}
+
+export function favView(host: HTMLElement): () => void {
+  host.append(titleBar('Избранное'));
+  const scroll = el('div', { class: 'scroll' });
+  host.append(scroll);
+
   if (!hasData()) {
-    root.appendChild(noDataState());
+    scroll.append(
+      emptyState('Расписание не загружено', 'Загрузите файл расписания в настройках — дальше всё работает без интернета.', button('Открыть настройки', () => openTab('settings'))),
+    );
     return () => {};
   }
-  const c = data();
-  const stops = prefs.favStops().map((id) => ({ id, idx: stopIdx(id) }));
-  const routes = prefs.favRoutes().map((id) => ({ id, idx: routeIdx(id) }));
-
-  if (!stops.length && !routes.length) {
-    root.appendChild(empty('Пока пусто', 'Откройте остановку или линию и нажмите ★ — они появятся здесь.'));
+  const lines = prefs
+    .favs()
+    .map((id) => lineById(id))
+    .filter((l): l is Line => !!l)
+    .sort(routeCompare);
+  if (!lines.length) {
+    scroll.append(emptyState('Пока пусто', 'Откройте линию на вкладке «Линии» и нажмите ★ — она появится здесь.', button('К линиям', () => openTab('lines'))));
     return () => {};
   }
 
-  if (stops.length) {
-    const list = el('div', { class: 'list' });
-    root.appendChild(el('section', { class: 'section' }, el('h3', null, 'Остановки'), list));
-    for (const s of stops) {
-      if (s.idx === undefined) {
-        list.appendChild(el('div', { class: 'row muted' }, `Остановка ${s.id} пропала из данных`, starButton(true, () => prefs.toggleFavStop(s.id))));
-        continue;
-      }
-      const idx = s.idx;
-      const lines = linesAtStop(idx).map((i) => c.routes[i]);
-      list.appendChild(
-        el(
-          'div',
-          { class: 'row fav-row' },
-          el(
-            'a',
-            { class: 'grow link', href: href(['stop', s.id]) },
-            el('div', { class: 'title' }, c.stops.name[idx]),
-            el('div', { class: 'sub' }, c.stops.code[idx] ? `код ${c.stops.code[idx]}` : '', lines.length ? lineBadges(lines, 6) : null),
-          ),
-          starButton(true, () => prefs.toggleFavStop(s.id)),
-        ),
-      );
-    }
-  }
-
-  if (routes.length) {
-    const list = el('div', { class: 'list' });
-    root.appendChild(el('section', { class: 'section' }, el('h3', null, 'Линии'), list));
-    for (const r of routes) {
-      if (r.idx === undefined) {
-        list.appendChild(el('div', { class: 'row muted' }, `Линия ${r.id} пропала из данных`, starButton(true, () => prefs.toggleFavRoute(r.id))));
-        continue;
-      }
-      const route = c.routes[r.idx];
-      const nextBox = el('div', { class: 'next3' });
-      void ensureRoutes([r.idx])
-        .then(() => {
-          const rd = routeData(r.idx!);
-          const now = secondsNow();
-          const dirs = [...new Set(rd.patterns.map((p) => p.dir))].sort();
-          for (const d of dirs) {
-            let best = -1;
-            rd.patterns.forEach((p, i) => {
-              if (p.dir === d && (best < 0 || p.trips > rd.patterns[best].trips)) best = i;
-            });
-            const p = rd.patterns[best];
-            const times = patternTimes(c.services, p, 0, new Date());
-            const nx = times.find((t) => t >= now);
-            nextBox.appendChild(
-              el('div', { class: 'next-item' }, el('small', null, `от ${c.stops.name[p.stops[0]]}`), el('b', null, nx === undefined ? 'сегодня больше нет' : fmtTime(nx))),
-            );
-          }
-        })
-        .catch(() => {});
-      list.appendChild(
-        el(
-          'div',
-          { class: 'row' },
-          el('a', { class: 'grow link row-inner', href: href(['route', r.id]) }, badge(route, 'lg'), el('div', { class: 'grow' }, el('div', { class: 'title' }, route.long || route.short), nextBox), icon('chevron')),
-          starButton(true, () => prefs.toggleFavRoute(r.id)),
-        ),
-      );
-    }
-  }
-  return () => {};
+  const cards = lines.map(makeCard);
+  const list = el('div', { class: 'fav-list' }, ...cards.map((c) => c.node));
+  scroll.append(list);
+  const tick = () => {
+    const now = new Date();
+    for (const c of cards) c.update(now);
+  };
+  tick();
+  // ширина известна только после вставки в документ
+  requestAnimationFrame(() => {
+    fitAll(list, '.term-name', 11);
+    list.querySelectorAll<HTMLElement>('.term-next').forEach((n) => fitText(n, 10));
+    list.querySelectorAll<HTMLElement>('.fav-num .badge').forEach((n) => fitText(n, 14));
+  });
+  const timer = window.setInterval(tick, 20000);
+  return () => window.clearInterval(timer);
 }

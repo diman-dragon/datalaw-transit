@@ -2,11 +2,7 @@ type Child = Node | string | number | null | undefined | false;
 type Attrs = Record<string, unknown> & { class?: string; style?: string };
 
 /** Мини-конструктор DOM: el('div', {class:'x', onclick: fn}, 'текст', child) */
-export function el<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  attrs?: Attrs | null,
-  ...children: Child[]
-): HTMLElementTagNameMap[K] {
+export function el<K extends keyof HTMLElementTagNameMap>(tag: K, attrs?: Attrs | null, ...children: Child[]): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
   if (attrs) {
     for (const [k, v] of Object.entries(attrs)) {
@@ -37,20 +33,23 @@ export function clear(node: Node): void {
 const ICONS = {
   search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
   star: '<path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/>',
-  back: '<path d="M15 5 8 12l7 7"/>',
+  bus: '<rect x="4" y="3" width="16" height="15" rx="3"/><path d="M4 11h16M8 21v-3M16 21v-3"/><circle cx="8" cy="14.6" r=".6"/><circle cx="16" cy="14.6" r=".6"/>',
+  sliders: '<path d="M4 7h9M19 7h1M4 17h1M11 17h9"/><circle cx="16" cy="7" r="2.4"/><circle cx="8" cy="17" r="2.4"/>',
   close: '<path d="M6 6l12 12M18 6 6 18"/>',
-  chevron: '<path d="m9 5 7 7-7 7"/>',
-  download: '<path d="M12 4v11m0 0-4-4m4 4 4-4M5 20h14"/>',
-  gear: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/>',
-  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  swapV: '<path d="M8 20V4m0 0L4.5 7.5M8 4l3.5 3.5M16 4v16m0 0-3.5-3.5M16 20l3.5-3.5"/>',
+  swapH: '<path d="M4 8h16m0 0-3.5-3.5M20 8l-3.5 3.5M20 16H4m0 0 3.5-3.5M4 16l3.5 3.5"/>',
+  arrowRight: '<path d="M5 12h14m0 0-6-6m6 6-6 6"/>',
+  upload: '<path d="M12 16V4m0 0L8 8m4-4 4 4M5 20h14"/>',
+  check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
+  alert: '<circle cx="12" cy="12" r="9"/><path d="M12 7.5V13M12 16.4v.1"/>',
   file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
 } as const;
 
 export type IconName = keyof typeof ICONS;
 
 export function icon(name: IconName, filled = false): SVGSVGElement {
-  const ns = 'http://www.w3.org/2000/svg';
-  const svg = document.createElementNS(ns, 'svg');
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('viewBox', '0 0 24 24');
   svg.setAttribute('class', 'icon' + (filled ? ' filled' : ''));
   svg.setAttribute('aria-hidden', 'true');

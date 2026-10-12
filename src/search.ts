@@ -1,5 +1,5 @@
-import type { Route, StopsData } from './types.ts';
-import { shortCompare } from './schedule.ts';
+import type { Line } from './types.ts';
+import { routeCompare } from './schedule.ts';
 
 const MAP: Record<string, string> = {
   а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', ђ: 'dj', е: 'e', ж: 'z', з: 'z', и: 'i', ј: 'j', к: 'k',
@@ -22,85 +22,43 @@ export function normalize(s: string): string {
     .trim();
 }
 
-export interface StopHit {
-  stop: number;
-  score: number;
-}
-export interface RouteHit {
-  route: number;
-  score: number;
+/** 0 — слово начинается с токена, 1 — начало другого слова, 2 — подстрока (токен ≥ 3 символов), 99 — нет */
+function scoreToken(hay: string, t: string): number {
+  if (hay.startsWith(t)) return 0;
+  if (hay.includes(' ' + t)) return 1;
+  if (t.length >= 3 && hay.includes(t)) return 2;
+  return 99;
 }
 
-export class SearchIndex {
-  private stops: StopsData;
-  private routes: Route[];
-  private stopNorm: string[];
-  private stopCode: string[];
-  private routeShort: string[];
-  private routeLong: string[];
+/** Поиск линий по номеру и по названиям конечных. */
+export class LineSearch {
+  private lines: Line[];
+  private shortN: string[];
+  private hay: string[];
 
-  constructor(stops: StopsData, routes: Route[]) {
-    this.stops = stops;
-    this.routes = routes;
-    this.stopNorm = stops.name.map(normalize);
-    this.stopCode = stops.code.map((c) => normalize(c));
-    this.routeShort = routes.map((r) => normalize(r.short));
-    this.routeLong = routes.map((r) => normalize(r.long));
+  constructor(lines: Line[]) {
+    this.lines = lines;
+    this.shortN = lines.map((l) => normalize(l.short).replace(/ /g, ''));
+    this.hay = lines.map((l) => normalize([l.long, ...l.dirs.map((d) => `${d.from} ${d.to}`)].join(' ')));
   }
 
-  searchStops(query: string, limit = 60): StopHit[] {
+  /** Индексы линий, подходящих запросу, лучшие первыми. Пустой запрос — пустой результат. */
+  search(query: string): number[] {
     const q = normalize(query);
     if (!q) return [];
+    const compact = q.replace(/ /g, '');
     const tokens = q.split(' ');
-    const hits: StopHit[] = [];
-    for (let i = 0; i < this.stopNorm.length; i++) {
-      const name = this.stopNorm[i];
-      const code = this.stopCode[i];
-      let total = 0;
-      let ok = true;
-      for (const t of tokens) {
-        const s = scoreToken(name, t);
-        const c = code && code.startsWith(t) ? 0 : 99;
-        const best = Math.min(s, c);
-        if (best >= 99) {
-          ok = false;
-          break;
-        }
-        total += best;
-      }
-      if (!ok) continue;
-      if (name.startsWith(q)) total -= 2;
-      if (name === q) total -= 2;
-      hits.push({ stop: i, score: total });
-    }
-    const names = this.stops.name;
-    const codes = this.stops.code;
-    hits.sort(
-      (a, b) =>
-        a.score - b.score ||
-        names[a.stop].length - names[b.stop].length ||
-        names[a.stop].localeCompare(names[b.stop], 'sr') ||
-        codes[a.stop].localeCompare(codes[b.stop], undefined, { numeric: true }),
-    );
-    return hits.slice(0, limit);
-  }
-
-  searchRoutes(query: string, limit = 40): RouteHit[] {
-    const q = normalize(query);
-    if (!q) return [];
-    const tokens = q.split(' ');
-    const hits: RouteHit[] = [];
-    for (let i = 0; i < this.routes.length; i++) {
-      const sh = this.routeShort[i];
-      const lg = this.routeLong[i];
-      let score = 0;
-      if (sh === q) score = 0;
-      else if (sh.startsWith(q.replace(/ /g, ''))) score = 1;
+    const hits: { i: number; score: number }[] = [];
+    for (let i = 0; i < this.lines.length; i++) {
+      const sh = this.shortN[i];
+      let score: number;
+      if (sh === compact) score = 0;
+      else if (sh.startsWith(compact)) score = 1;
       else {
-        let ok = true;
         let total = 0;
+        let ok = true;
         for (const t of tokens) {
-          const s = scoreToken(lg, t);
+          const s = scoreToken(this.hay[i], t);
           if (s >= 99) {
             ok = false;
             break;
@@ -110,18 +68,10 @@ export class SearchIndex {
         if (!ok) continue;
         score = 3 + total;
       }
-      hits.push({ route: i, score });
+      hits.push({ i, score });
     }
-    const routes = this.routes;
-    hits.sort((a, b) => a.score - b.score || shortCompare(routes[a.route].short, routes[b.route].short));
-    return hits.slice(0, limit);
+    const L = this.lines;
+    hits.sort((a, b) => a.score - b.score || routeCompare(L[a.i], L[b.i]));
+    return hits.map((h) => h.i);
   }
-}
-
-/** 0 — слово начинается с токена, 1 — начало первого слова, 2 — подстрока (токен ≥ 3 символов), 99 — нет */
-function scoreToken(hay: string, t: string): number {
-  if (hay.startsWith(t)) return 0;
-  if (hay.includes(' ' + t)) return 1;
-  if (t.length >= 3 && hay.includes(t)) return 2;
-  return 99;
 }

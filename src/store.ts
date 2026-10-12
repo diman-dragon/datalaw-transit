@@ -1,71 +1,37 @@
-import { loadCore, loadRouteData } from './db.ts';
-import type { Core } from './db.ts';
-import { SearchIndex } from './search.ts';
-import { routeCompare, routesAtStop } from './schedule.ts';
-import type { RouteData } from './types.ts';
+import { loadDataset } from './db.ts';
+import { LineSearch } from './search.ts';
+import type { Dataset, Line } from './types.ts';
 
-let core: Core | null = null;
-let search: SearchIndex | null = null;
-let stopById: Map<string, number> | null = null;
-let routeById: Map<string, number> | null = null;
-const rdCache = new Map<number, RouteData>();
+let ds: Dataset | null = null;
+let byId: Map<string, Line> | null = null;
+let search: LineSearch | null = null;
 
 export function hasData(): boolean {
-  return core !== null;
+  return ds !== null && ds.lines.length > 0;
 }
 
-export function data(): Core {
-  if (!core) throw new Error('Данные не загружены');
-  return core;
+export function data(): Dataset {
+  if (!ds) throw new Error('Расписание не загружено');
+  return ds;
+}
+
+export function setDataset(next: Dataset | null): void {
+  ds = next;
+  byId = null;
+  search = next ? new LineSearch(next.lines) : null;
 }
 
 export async function initStore(): Promise<void> {
-  setCore(await loadCore());
+  setDataset(await loadDataset());
 }
 
-export function setCore(c: Core | null): void {
-  core = c;
-  rdCache.clear();
-  stopById = routeById = null;
-  search = c ? new SearchIndex(c.stops, c.routes) : null;
+export function lineById(id: string): Line | undefined {
+  if (!ds) return undefined;
+  if (!byId) byId = new Map(ds.lines.map((l) => [l.id, l]));
+  return byId.get(id);
 }
 
-export function searchIndex(): SearchIndex {
-  if (!search) throw new Error('Данные не загружены');
+export function lineSearch(): LineSearch {
+  if (!search) throw new Error('Расписание не загружено');
   return search;
-}
-
-export function stopIdx(id: string): number | undefined {
-  if (!core) return undefined;
-  if (!stopById) stopById = new Map(core.stops.id.map((x, i) => [x, i]));
-  return stopById.get(id);
-}
-
-export function routeIdx(id: string): number | undefined {
-  if (!core) return undefined;
-  if (!routeById) routeById = new Map(core.routes.map((r, i) => [r.id, i]));
-  return routeById.get(id);
-}
-
-export async function ensureRoutes(list: number[]): Promise<void> {
-  await Promise.all(
-    list.map(async (r) => {
-      if (rdCache.has(r)) return;
-      const rd = await loadRouteData(r);
-      if (!rd) throw new Error(`Нет данных линии #${r}. Обновите данные в настройках.`);
-      rdCache.set(r, rd);
-    }),
-  );
-}
-
-export function routeData(r: number): RouteData {
-  const rd = rdCache.get(r);
-  if (!rd) throw new Error(`Линия #${r} не загружена`);
-  return rd;
-}
-
-/** Линии, проходящие через остановку (включая те, что здесь заканчиваются), по номеру. */
-export function linesAtStop(stop: number): number[] {
-  const c = data();
-  return routesAtStop(c.stopIndex, stop).sort((a, b) => routeCompare(c.routes[a], c.routes[b]));
 }
