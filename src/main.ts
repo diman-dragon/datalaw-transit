@@ -8,6 +8,8 @@ import { fmtDateInt, monthKey, validityFull } from './format.ts';
 import { button, emptyState } from './ui/common.ts';
 import { clear, el, icon } from './ui/dom.ts';
 import type { IconName } from './ui/dom.ts';
+import { autoRefreshIfStale, initChanges, onChangesUpdated, unseenCount } from './changes-sync.ts';
+import { changesView } from './ui/changes-view.ts';
 import { favView } from './ui/fav-view.ts';
 import { linesView } from './ui/lines-view.ts';
 import { handleBack, openTab, parseHash, resetToFav } from './ui/nav.ts';
@@ -25,12 +27,14 @@ applyTheme(prefs.theme);
 const TABS: { id: TabId; label: string; icon: IconName }[] = [
   { id: 'fav', label: 'Избранное', icon: 'star' },
   { id: 'lines', label: 'Линии', icon: 'bus' },
+  { id: 'changes', label: 'Изменения', icon: 'warn' },
   { id: 'settings', label: 'Настройки', icon: 'sliders' },
 ];
 
 const VIEWS: Record<string, { tab: TabId | null; fn: ViewFn }> = {
   fav: { tab: 'fav', fn: favView },
   lines: { tab: 'lines', fn: linesView },
+  changes: { tab: 'changes', fn: changesView },
   settings: { tab: 'settings', fn: settingsView },
   route: { tab: null, fn: routeView },
 };
@@ -40,6 +44,7 @@ const view = el('main', { class: 'view', id: 'view' });
 const tabButtons = TABS.map((t) => {
   const b = el('button', { class: 'tab', 'data-tab': t.id, 'aria-label': t.label }, el('span', { class: 'tab-ico' }, icon(t.icon)), el('span', { class: 'tab-label' }, t.label));
   b.addEventListener('click', () => openTab(t.id));
+  if (t.id === 'changes') b.querySelector('.tab-ico')!.append(el('span', { class: 'tab-dot hidden', 'aria-label': 'Есть новые изменения' }));
   return b;
 });
 const nav = el('nav', { class: 'tabbar', 'aria-label': 'Разделы' }, ...tabButtons);
@@ -83,6 +88,13 @@ function render(): void {
   view.replaceChildren(host);
 }
 
+/** Точка на вкладке «Изменения», если появились новые, которые ещё не смотрели. */
+function updateBadge(): void {
+  const dot = nav.querySelector('.tab-dot');
+  const onTab = (parseHash().path[0] ?? '') === 'changes';
+  dot?.classList.toggle('hidden', onTab || unseenCount() === 0);
+}
+
 /** Раз в месяц, при первом открытии: напомнить проверить актуальность расписания. */
 function monthlyReminder(): void {
   const now = new Date();
@@ -118,7 +130,12 @@ if (Capacitor.isNativePlatform()) {
   } catch (e) {
     console.error(e);
   }
+  await initChanges();
   resetToFav(); // приложение всегда открывается на «Избранном»
   render();
+  updateBadge();
+  onChangesUpdated(updateBadge);
+  window.addEventListener('hashchange', updateBadge);
   monthlyReminder();
+  void autoRefreshIfStale(); // изменения обновляются сами, но только по Wi-Fi
 })();

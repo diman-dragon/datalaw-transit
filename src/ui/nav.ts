@@ -5,7 +5,7 @@ export interface Loc {
   query: URLSearchParams;
 }
 
-export type TabId = 'fav' | 'lines' | 'settings';
+export type TabId = 'fav' | 'lines' | 'changes' | 'settings';
 
 export function parseHash(hash = location.hash): Loc {
   const raw = hash.replace(/^#\/?/, '');

@@ -6,6 +6,8 @@ interface Stored {
   favs: string[];
   /** месяц, в котором уже показали напоминание («2026-10») */
   remindMonth: string;
+  /** когда пользователь последний раз смотрел вкладку «Изменения» (ISO) */
+  changesViewed: string;
 }
 
 const KEY = 'datalaw-transit/prefs/v1';
@@ -14,16 +16,17 @@ let cache: Stored | null = null;
 
 function load(): Stored {
   if (cache) return cache;
-  const d: Stored = { theme: 'amoled', favs: [], remindMonth: '' };
+  const d: Stored = { theme: 'amoled', favs: [], remindMonth: '', changesViewed: '' };
   try {
     const raw = localStorage.getItem(KEY);
     if (raw) {
       // поля старых версий (favRoutes и др.) читаем, лишнее игнорируем
-      const p = JSON.parse(raw) as { theme?: unknown; favs?: unknown; favRoutes?: unknown; remindMonth?: unknown };
+      const p = JSON.parse(raw) as { theme?: unknown; favs?: unknown; favRoutes?: unknown; remindMonth?: unknown; changesViewed?: unknown };
       if (p.theme === 'amoled' || p.theme === 'sand') d.theme = p.theme;
       const f = Array.isArray(p.favs) ? p.favs : Array.isArray(p.favRoutes) ? p.favRoutes : [];
       d.favs = f.filter((x): x is string => typeof x === 'string');
       if (typeof p.remindMonth === 'string') d.remindMonth = p.remindMonth;
+      if (typeof p.changesViewed === 'string') d.changesViewed = p.changesViewed;
     }
   } catch {
     /* хранилище недоступно — работаем с настройками по умолчанию */
@@ -61,6 +64,13 @@ export const prefs = {
   },
   get remindMonth(): string {
     return load().remindMonth;
+  },
+  get changesViewed(): string {
+    return load().changesViewed;
+  },
+  setChangesViewed(iso: string): void {
+    load().changesViewed = iso;
+    save();
   },
   setRemindMonth(m: string): void {
     load().remindMonth = m;

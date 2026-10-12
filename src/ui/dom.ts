@@ -42,6 +42,8 @@ const ICONS = {
   download: '<path d="M12 4v11m0 0-4-4m4 4 4-4M5 20h14"/>',
   upload: '<path d="M12 16V4m0 0L8 8m4-4 4 4M5 20h14"/>',
   check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
+  warn: '<path d="M12 3.5 2.8 19.5h18.4z"/><path d="M12 10v4.5M12 17.2v.1"/>',
+  refresh: '<path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/>',
   alert: '<circle cx="12" cy="12" r="9"/><path d="M12 7.5V13M12 16.4v.1"/>',
   file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
